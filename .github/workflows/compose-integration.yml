@@ -1,6 +1,6 @@
 name: Compose integration
 on:
-  workflow_dispatch
+  workflow_dispatch:
   push:
   pull_request:
 
