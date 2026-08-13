@@ -1,9 +1,12 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
+#Мои исключения
 *.md*
 *.dockerignore*
 *.openai*
 *.log*
+*.tar.*
+/auto_backups/
+/nginx/certs/
 # dependencies
 /node_modules
 /.pnp
