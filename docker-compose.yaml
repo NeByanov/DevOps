@@ -59,7 +59,8 @@ services:
       start_period: 15s
 
   web:
-    build: .codex-source
+    build:
+      context: ${WEB_BUILD_CONTEXT:-.}
     restart: unless-stopped
     environment:
       POSTGREST_URL: http://postgrest:3000
