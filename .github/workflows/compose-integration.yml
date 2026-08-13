@@ -1,6 +1,5 @@
 name: Compose integration
-
-on:
+on: workflow_dispatch
   push:
   pull_request:
 
@@ -9,7 +8,7 @@ permissions:
 
 jobs:
   integration:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 10
 
     steps:
