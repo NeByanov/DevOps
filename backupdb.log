@@ -113,3 +113,4 @@ Backup completed: /home/vboxuser/dockerproject/Site/auto_backups/backup_mysite_2
 /home/vboxuser/dockerproject/Site/auto_backups/backup_mysite_2026-08-12_15:00:01.sql
 /home/vboxuser/dockerproject/Site/auto_backups/backup_mysite_2026-08-12_14:00:01.sql
 /home/vboxuser/dockerproject/Site/auto_backups/backup_mysite_2026-08-12_13:00:01.sql
+/bin/sh: 1: /home/vboxuser/dockerproject/Site/auto_backups/backups.sh: not found
