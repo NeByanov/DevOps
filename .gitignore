@@ -1,12 +1,13 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 #Мои исключения
 *.md*
-*.dockerignore*
+*.dockerignore
 *.openai*
 *.log*
 *.tar.*
 /auto_backups/
 /nginx/certs/
+*.env
 # dependencies
 /node_modules
 /.pnp
@@ -34,9 +35,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
 
 # vercel
 .vercel
