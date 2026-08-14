@@ -9,13 +9,25 @@ jobs:
   integration:
     runs-on: self-hosted
     timeout-minutes: 10
+    env:
+      COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}
+      HTTP_PORT: 8080
+      HTTPS_PORT: 8443
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-      - name: Create temporary CI certificate
+
+      - name: Create isolated CI configuration
         shell: bash
         run: |
+          cat > .env <<'EOF'
+          POSTGRES_DB=mysite
+          POSTGRES_USER=app_owner
+          POSTGRES_PASSWORD=ci-only-password-not-a-secret
+          EOF
+
+          rm -rf nginx/certs
           mkdir -p nginx/certs
 
           openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
@@ -25,17 +37,6 @@ jobs:
             -addext 'subjectAltName = IP:127.0.0.1'
 
           chmod 600 nginx/certs/site.key
-          test -s nginx/certs/site.crt
-          test -s nginx/certs/site.key
-      - name: Set .env postgresDB
-        run: |
-          cat > .env <<EOF
-          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
-          EOF
-          # Опционально: проверить, что файл создан
-          cat .env
 
       - name: Validate Compose configuration
         run: docker compose config -q
@@ -70,14 +71,14 @@ jobs:
       - name: Test HTTP redirect and HTTPS routes through Nginx
         shell: bash
         run: |
-          http_headers="$(curl --silent --show-error --dump-header - --output /dev/null http://127.0.0.1/)"
+          http_headers="$(curl --silent --show-error --dump-header - --output /dev/null http://127.0.0.1:8080/)"
           printf '%s\n' "$http_headers"
           grep -q '^HTTP/.* 301' <<<"$http_headers"
           grep -qi '^location: https://127.0.0.1/' <<<"$http_headers"
 
-          curl --fail --silent --show-error --insecure https://127.0.0.1/ > /dev/null
-          curl --fail --silent --show-error --insecure https://127.0.0.1/api/health | jq -e '.status == "ok"'
-          curl --fail --silent --show-error --insecure https://127.0.0.1/api/tasks | jq -e '.tasks | type == "array"'
+          curl --fail --silent --show-error --insecure https://127.0.0.1:8443/ > /dev/null
+          curl --fail --silent --show-error --insecure https://127.0.0.1:8443/api/health | jq -e '.status == "ok"'
+          curl --fail --silent --show-error --insecure https://127.0.0.1:8443/api/tasks | jq -e '.tasks | type == "array"'
 
       - name: Show container logs on failure
         if: failure()

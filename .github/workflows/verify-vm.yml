@@ -1,0 +1,25 @@
+name: Verify deployed VM
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: self-hosted
+
+    steps:
+      - name: Check deployed stack
+        working-directory: /home/vboxuser/dockerproject/Site
+        shell: bash
+        run: |
+          docker compose ps
+
+          for service in postgres postgrest web nginx; do
+            id="$(docker compose ps -q "$service")"
+            docker inspect --format '{{.Name}}: {{.State.Health.Status}}' "$id"
+          done
+
+          curl -fsSI http://127.0.0.1/
+          curl -kfsS https://127.0.0.1/
+          curl -kfsS https://127.0.0.1/api/health
+          curl -kfsS https://127.0.0.1/api/tasks
