@@ -32,7 +32,7 @@ jobs:
       - name: Wait until all services are healthy
         shell: bash
         run: |
-          deadline=$((SECONDS + 60))
+          deadline=$((SECONDS + 30))
           while (( SECONDS < deadline )); do
             all_healthy=true
             for service in postgres postgrest web nginx; do
