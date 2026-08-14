@@ -1,5 +1,5 @@
 name: Auto integration
-on: [push,pull_request]
+on: #[push,pull_request]
 
 permissions:
   contents: read
