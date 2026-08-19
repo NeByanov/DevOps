@@ -7,7 +7,7 @@ permissions:
   content: read
 
 jobs:
-  build-and-push
+  build-and-push:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
