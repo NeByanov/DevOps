@@ -5,8 +5,8 @@ on:
       - main
 
 permissions:
-  package: write
-  content: read
+  packages: write
+  contents: read
 
 jobs:
   build-and-push:
