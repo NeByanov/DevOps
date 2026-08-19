@@ -8,6 +8,10 @@
 /nginx/certs/
 *.env
 /actions-runner/
+.grafana.env
+.secrets/
+
+
 # dependencies
 /node_modules
 /.pnp
