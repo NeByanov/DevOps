@@ -38,6 +38,12 @@ jobs:
           push: true
           cache-from: type=registry,ref=ghcr.io/nebyanov/devops:latest
           cache-to: type=inline
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }}
+            org.opencontainers.image.description="Долговременная интеграция для GithubActions"
+            org.opencontainers.image.version=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: |
             ghcr.io/nebyanov/devops:latest
             ghcr.io/nebyanov/devops:${{ github.sha }}
