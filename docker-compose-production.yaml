@@ -1,0 +1,5 @@
+services:
+  web:
+    build: !reset null
+    image: ghcr.io/nebyanov/devops:${WEB_IMAGE_TAG:?WEB_IMAGE_TAG must be a full Git SHA}
+    pull_policy: always
