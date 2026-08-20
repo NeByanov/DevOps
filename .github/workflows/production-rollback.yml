@@ -29,6 +29,7 @@ jobs:
     environment: production
     timeout-minutes: 10
 
+    steps:
       - name: Enforce explicit confirmation
         run: |
           if [ "${{ inputs.confirm_rollback }}" != "true" ]; then
@@ -36,7 +37,6 @@ jobs:
             exit 1
           fi
 
-    steps:
       - name: Check branch is main
         run: |
           if [ "${{ github.ref_name }}" != "main" ]; then
