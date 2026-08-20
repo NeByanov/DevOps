@@ -24,6 +24,7 @@ jobs:
     environment: production
     timeout-minutes: 10
 
+    steps:
       - name: Check branch is main
         run: |
           if [ "${{ github.ref_name }}" != "main" ]; then
