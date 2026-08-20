@@ -2,6 +2,8 @@ name: Production deploy
 
 on:
   workflow_dispatch:
+    branches:
+      - main
     inputs:
       image_digest:
         description: "GHCR image digest (sha256:<64 hex>)"
@@ -19,6 +21,7 @@ concurrency:
 jobs:
   production-deploy:
     runs-on: self-hosted
+    enviroment: production
     timeout-minutes: 10
 
     steps:
@@ -37,3 +40,21 @@ jobs:
         run: |
           set -Eeuo pipefail
           ./deploy-web.sh "$IMAGE_DIGEST"
+
+      - name: Test HTTP redirect and HTTPS routes through Nginx
+        shell: bash
+        run: |
+          http_headers="$(curl --silent --show-error --dump-header - --output /dev/null http://127.0.0.1/)"
+          printf '%s\n' "$http_headers"
+          grep -q '^HTTP/.* 301' <<<"$http_headers"
+          grep -qi '^location: https://127.0.0.1/' <<<"$http_headers"
+
+          curl --fail --silent --show-error --insecure https://127.0.0.1/ > /dev/null
+          curl --fail --silent --show-error --insecure https://127.0.0.1/api/health | jq -e '.status == "ok"'
+          curl --fail --silent --show-error --insecure https://127.0.0.1/api/tasks | jq -e '.tasks | type == "array"'
+
+      - name: Show container logs on failure
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --no-color
