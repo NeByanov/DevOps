@@ -17,7 +17,7 @@ env:
 jobs:
   production-deploy:
     runs-on: self-hosted
-      timeout-minutes: 10
+    timeout-minutes: 10
     env:
       COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}
       HTTP_PORT: 8080
