@@ -40,9 +40,16 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5.3.0
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - name: Show GHCR image digest
+        shell: bash
+        run: |
+          echo "### GHCR image" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: \`ghcr.io/nebyanov/devops:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
