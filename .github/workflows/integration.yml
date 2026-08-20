@@ -37,7 +37,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/nebyanov/devops:main
           cache-from: type=registry,ref=ghcr.io/nebyanov/devops:latest
           cache-to: type=inline
           labels: |
