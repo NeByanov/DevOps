@@ -49,9 +49,9 @@ jobs:
             exit 1
           fi
 
-          git fetch github
+          git fetch dev
           LOCAL_COMMIT=$(git rev-parse HEAD)
-          REMOTE_COMMIT=$(git rev-parse "github/main")
+          REMOTE_COMMIT=$(git rev-parse "dev/main")
 
           if [ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]; then
             echo "::ошибка::Локальная ветка отличается  main! local=$LOCAL_COMMIT, remote=$REMOTE_COMMIT"
