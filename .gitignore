@@ -10,7 +10,7 @@
 /actions-runner/
 .grafana.env
 .secrets/
-
+/DevOps/
 
 # dependencies
 /node_modules
