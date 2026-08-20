@@ -29,6 +29,13 @@ jobs:
     environment: production
     timeout-minutes: 10
 
+      - name: Enforce explicit confirmation
+        run: |
+          if [ "${{ inputs.confirm_rollback }}" != "true" ]; then
+            echo "::error::Откат не подтверждён. Установите confirm_rollback=true для запуска."
+            exit 1
+          fi
+
     steps:
       - name: Check branch is main
         run: |
