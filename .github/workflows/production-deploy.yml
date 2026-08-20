@@ -44,7 +44,7 @@ jobs:
       - name: Test HTTP redirect and HTTPS routes through Nginx
         shell: bash
         run: |
-          http_headers="$(curl --silent --show-error --dump-header - --output /dev/null http://127.0.0.1:8080/)"
+          http_headers="$(curl --silent --show-error --dump-header - --output /dev/null http://127.0.0.1:80/)"
           printf '%s\n' "$http_headers"
           grep -q '^HTTP/.* 301' <<<"$http_headers"
           grep -qi '^location: https://127.0.0.1/' <<<"$http_headers"
