@@ -2,8 +2,6 @@ name: Production deploy
 
 on:
   workflow_dispatch:
-    branches:
-      - main
     inputs:
       image_digest:
         description: "GHCR image digest (sha256:<64 hex>)"
@@ -36,29 +34,45 @@ jobs:
       - name: Verify Git state on VM before deploy
         working-directory: /home/vboxuser/dockerproject/Site
         shell: bash
+        env:
+          EXPECTED_BRANCH: ${{ github.ref_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
 
-          if ! git diff --exit-code --quiet; then
-            echo "::ошибка::Ветка грязкая! Имеет незакомиченные изменения."
+          if [[ "$EXPECTED_BRANCH" != "main" ]]; then
+            echo "::error::Разрешён запуск только из ветки main"
+            echo "Выбрана ветка: $EXPECTED_BRANCH"
             exit 1
           fi
 
-          if ! git diff --cached --exit-code --quiet; then
-            echo "::ошибка::Staged файл грязный. Закоммить изменения и деплойни."
+          CURRENT_BRANCH="$(git branch --show-current)"
+
+          if [[ "$CURRENT_BRANCH" != "main" ]]; then
+            echo "::error::На VM выбрана ветка $CURRENT_BRANCH вместо main"
             exit 1
           fi
 
-          git fetch dev
-          LOCAL_COMMIT=$(git rev-parse HEAD)
-          REMOTE_COMMIT=$(git rev-parse "dev/main")
+          GIT_STATE="$(git status --porcelain --untracked-files=normal)"
 
-          if [ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]; then
-            echo "::ошибка::Локальная ветка отличается  main! local=$LOCAL_COMMIT, remote=$REMOTE_COMMIT"
+          if [[ -n "$GIT_STATE" ]]; then
+            echo "::error::Рабочее дерево на VM содержит изменения"
+            printf '%s\n' "$GIT_STATE"
             exit 1
           fi
 
-          echo "Git state verified: clean and up-to-date with origin/main"
+          LOCAL_COMMIT="$(git rev-parse HEAD)"
+
+          if [[ "$LOCAL_COMMIT" != "$EXPECTED_COMMIT" ]]; then
+            echo "::error::Код на VM не соответствует commit запуска workflow"
+            echo "VM:     $LOCAL_COMMIT"
+            echo "GitHub: $EXPECTED_COMMIT"
+            exit 1
+          fi
+
+          echo "Git state verified"
+          echo "Branch: $CURRENT_BRANCH"
+          echo "Commit: $LOCAL_COMMIT"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -90,6 +104,8 @@ jobs:
 
       - name: Show container logs on failure
         if: failure()
+        working-directory: /home/vboxuser/dockerproject/Site
+        shell: bash
         run: |
-          docker compose ps
-          docker compose logs --no-color
+          docker compose --project-name site ps
+          docker compose --project-name site logs --no-color --tail=200
