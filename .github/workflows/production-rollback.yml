@@ -1,0 +1,107 @@
+name: Production rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: "GHCR image digest (sha256:<64 hex>)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  production-rollback:
+    runs-on: self-hosted
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Check branch is main
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "Ошибка: разрешено запускать только из ветки main."
+            echo "Текущая (выбранная) ветка: ${{ github.ref_name }}"
+            exit 1
+          fi
+
+      - name: Verify Git state on VM before deploy
+        working-directory: /home/vboxuser/dockerproject/Site
+        shell: bash
+        env:
+          EXPECTED_BRANCH: ${{ github.ref_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$EXPECTED_BRANCH" != "main" ]]; then
+            echo "::error::Разрешён запуск только из ветки main"
+            echo "Выбрана ветка: $EXPECTED_BRANCH"
+            exit 1
+          fi
+
+          CURRENT_BRANCH="$(git branch --show-current)"
+
+          if [[ "$CURRENT_BRANCH" != "main" ]]; then
+            echo "::error::На VM выбрана ветка $CURRENT_BRANCH вместо main"
+            exit 1
+          fi
+
+          GIT_STATE="$(git status --porcelain --untracked-files=normal)"
+
+          if [[ -n "$GIT_STATE" ]]; then
+            echo "::error::Рабочее дерево на VM содержит изменения"
+            printf '%s\n' "$GIT_STATE"
+            exit 1
+          fi
+
+          LOCAL_COMMIT="$(git rev-parse HEAD)"
+
+          if [[ "$LOCAL_COMMIT" != "$EXPECTED_COMMIT" ]]; then
+            echo "::error::Код на VM не соответствует commit запуска workflow"
+            echo "VM:     $LOCAL_COMMIT"
+            echo "GitHub: $EXPECTED_COMMIT"
+            exit 1
+          fi
+
+          echo "Git state verified"
+          echo "Branch: $CURRENT_BRANCH"
+          echo "Commit: $LOCAL_COMMIT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rolls back to a certain version
+        uses: fivebluepetals/rollback-action@v1.0
+        with:
+          revision: ${{ github.event.inputs.revision }}
+
+      - name: Test HTTP redirect and HTTPS routes through Nginx
+        shell: bash
+        run: |
+          http_headers="$(curl --silent --show-error --dump-header - --output /dev/null http://127.0.0.1:80/)"
+          printf '%s\n' "$http_headers"
+          grep -q '^HTTP/.* 301' <<<"$http_headers"
+          grep -qi '^location: https://127.0.0.1/' <<<"$http_headers"
+
+          curl --fail --silent --show-error --insecure https://127.0.0.1/ > /dev/null
+          curl --fail --silent --show-error --insecure https://127.0.0.1/api/health | jq -e '.status == "ok"'
+          curl --fail --silent --show-error --insecure https://127.0.0.1/api/tasks | jq -e '.tasks | type == "array"'
+
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: /home/vboxuser/dockerproject/Site
+        shell: bash
+        run: |
+          docker compose --project-name site ps
+          docker compose --project-name site logs --no-color --tail=200
