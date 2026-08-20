@@ -1,9 +1,13 @@
 name: Production deploy
 on:
   workflow_dispatch:
+    inputs:
+      image_digest:
+        description: 'Image digest (sha256: )'
+        required: true
+        type: string
 
 permissions:
-  packages: write
   contents: read
 
 env:
@@ -13,7 +17,7 @@ env:
 jobs:
   production-deploy:
     runs-on: self-hosted
-    timeout-minutes: 10
+      timeout-minutes: 10
     env:
       COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}
       HTTP_PORT: 8080
@@ -39,17 +43,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      - name: Build and push Docker image
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-      - name: Show GHCR image digest
-        shell: bash
-        run: |
-          echo "### GHCR image" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Tag: \`ghcr.io/nebyanov/devops:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Deploy to vm
+        env:
+          IMAGE_DIGEST: ${{ inputs.image_digest }}
+        run: ./deploy-web.sh

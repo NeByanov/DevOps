@@ -37,6 +37,7 @@ jobs:
         with:
           context: .
           push: true
+          tags: ghcr.io/nebyanov/devops:main
           cache-from: type=registry,ref=ghcr.io/nebyanov/devops:latest
           cache-to: type=inline
           labels: |
@@ -54,3 +55,5 @@ jobs:
           echo "### GHCR image" >> "$GITHUB_STEP_SUMMARY"
           echo "- Tag: \`ghcr.io/nebyanov/devops:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Show digest
+        run: echo "Digest: ${{ steps.build.outputs.digest}}"
