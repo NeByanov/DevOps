@@ -24,6 +24,41 @@ jobs:
     environment: production
     timeout-minutes: 10
 
+      - name: Check branch is main
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "Ошибка: разрешено запускать только из ветки main."
+            echo "Текущая (выбранная) ветка: ${{ github.ref_name }}"
+            exit 1
+          fi
+
+      - name: Verify Git state on VM before deploy
+        working-directory: /home/vboxuser/dockerproject/Site
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          if ! git diff --exit-code --quiet; then
+            echo "::ошибка::Ветка грязкая! Имеет незакомиченные изменения."
+            exit 1
+          fi
+
+          if ! git diff --cached --exit-code --quiet; then
+            echo "::ошибка::Staged файл грязный. Закоммить изменения и деплойни."
+            exit 1
+          fi
+
+          git fetch origin
+          LOCAL_COMMIT=$(git rev-parse HEAD)
+          REMOTE_COMMIT=$(git rev-parse "origin/main")
+
+          if [ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]; then
+            echo "::ошибка::Локальная ветка отличается  origin! local=$LOCAL_COMMIT, remote=$REMOTE_COMMIT"
+            exit 1
+          fi
+
+          echo "Git state verified: clean and up-to-date with origin/main"
+
     steps:
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
