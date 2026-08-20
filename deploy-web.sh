@@ -49,22 +49,19 @@ readonly TARGET_IMAGE="${IMAGE_REPO}@${TARGET_DIGEST}"
 [[ -r "$BASE" ]] || die "Не найден $BASE"
 [[ -r "$PROD" ]] || die "Не найден $PROD"
 
-for command_name in sudo docker jq flock; do
+for command_name in docker jq flock; do
   command -v "$command_name" >/dev/null ||
     die "Не найдена команда: $command_name"
 done
 
-# Заранее запрашиваем sudo, чтобы это не произошло посреди deploy.
-sudo -v
-
-sudo docker compose version >/dev/null
+docker compose version >/dev/null
 
 # Запускает Compose с указанным digest.
 dc() {
   local digest="$1"
   shift
 
-  sudo env WEB_IMAGE_DIGEST="$digest" \
+  WEB_IMAGE_DIGEST="$digest" \
     docker compose \
       --project-name "$PROJECT_NAME" \
       --project-directory "$ROOT" \
@@ -117,15 +114,15 @@ healthy_with_image() {
   local health
 
   actual_image_id="$(
-    sudo docker inspect --format '{{.Image}}' "$container_id"
+    docker inspect --format '{{.Image}}' "$container_id"
   )" || return 1
 
   state="$(
-    sudo docker inspect --format '{{.State.Status}}' "$container_id"
+    docker inspect --format '{{.State.Status}}' "$container_id"
   )" || return 1
 
   health="$(
-    sudo docker inspect \
+    docker inspect \
       --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
       "$container_id"
   )" || return 1
@@ -145,7 +142,7 @@ find_image_digest() {
   local prefix="${IMAGE_REPO}@"
 
   refs="$(
-    sudo docker image inspect \
+    docker image inspect \
       --format '{{range .RepoDigests}}{{println .}}{{end}}' \
       "$image_id"
   )" || return 1
@@ -169,11 +166,11 @@ previous_container="$(one_web_container "$TARGET_DIGEST")" ||
   die 'Ожидался ровно один существующий контейнер web'
 
 previous_image_id="$(
-  sudo docker inspect --format '{{.Image}}' "$previous_container"
+  docker inspect --format '{{.Image}}' "$previous_container"
 )" || die 'Не удалось определить текущий image ID'
 
 previous_health="$(
-  sudo docker inspect \
+  docker inspect \
     --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
     "$previous_container"
 )" || die 'Не удалось определить health текущего web'
@@ -188,7 +185,7 @@ readonly PREVIOUS_DIGEST="$previous_digest"
 readonly PREVIOUS_IMAGE="${IMAGE_REPO}@${PREVIOUS_DIGEST}"
 
 previous_resolved_id="$(
-  sudo docker image inspect --format '{{.Id}}' "$PREVIOUS_IMAGE"
+  docker image inspect --format '{{.Id}}' "$PREVIOUS_IMAGE"
 )" || die 'Предыдущий образ отсутствует локально'
 
 [[ "$previous_resolved_id" == "$previous_image_id" ]] ||
@@ -202,7 +199,7 @@ dc "$TARGET_DIGEST" pull --policy always web ||
   die "Не удалось скачать $TARGET_IMAGE"
 
 target_image_id="$(
-  sudo docker image inspect --format '{{.Id}}' "$TARGET_IMAGE"
+  docker image inspect --format '{{.Id}}' "$TARGET_IMAGE"
 )" || die 'Скачанный образ отсутствует локально'
 
 # Автоматический rollback на предыдущий digest.
@@ -214,7 +211,7 @@ rollback() {
 
   # Убеждаемся, что старый образ всё ещё есть локально.
   resolved_previous_id="$(
-    sudo docker image inspect --format '{{.Id}}' "$PREVIOUS_IMAGE"
+    docker image inspect --format '{{.Id}}' "$PREVIOUS_IMAGE"
   )" || return 1
 
   [[ "$resolved_previous_id" == "$previous_image_id" ]] ||
