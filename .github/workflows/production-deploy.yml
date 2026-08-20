@@ -49,12 +49,12 @@ jobs:
             exit 1
           fi
 
-          git fetch origin
+          git fetch main
           LOCAL_COMMIT=$(git rev-parse HEAD)
-          REMOTE_COMMIT=$(git rev-parse "origin/main")
+          REMOTE_COMMIT=$(git rev-parse "/main")
 
           if [ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]; then
-            echo "::ошибка::Локальная ветка отличается  origin! local=$LOCAL_COMMIT, remote=$REMOTE_COMMIT"
+            echo "::ошибка::Локальная ветка отличается  main! local=$LOCAL_COMMIT, remote=$REMOTE_COMMIT"
             exit 1
           fi
 
