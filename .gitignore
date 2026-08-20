@@ -6,7 +6,7 @@
 *.tar.*
 /auto_backups/
 /nginx/certs/
-*.env
+*.env*
 /actions-runner/
 .grafana.env
 .secrets/
