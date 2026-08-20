@@ -7,6 +7,13 @@ on:
         description: "GHCR image digest (sha256:<64 hex>)"
         required: true
         type: string
+      confirm_rollback:
+        description: "Вы действительно хотите откатить сборку?Операция необоратима!"
+        required: true
+        type: boolean
+        default: false
+
+run-name: Rollback to ${{ inputs.image_digest }}
 
 permissions:
   contents: read
