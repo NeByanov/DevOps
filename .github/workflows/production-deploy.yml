@@ -24,13 +24,13 @@ jobs:
     environment: production
     timeout-minutes: 10
 
-        - name: Check branch is main
-          run: |
-            if [ "${{ github.ref_name }}" != "main" ]; then
-              echo "Ошибка: разрешено запускать только из ветки main."
-              echo "Текущая (выбранная) ветка: ${{ github.ref_name }}"
-              exit 1
-            fi
+      - name: Check branch is main
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "Ошибка: разрешено запускать только из ветки main."
+            echo "Текущая (выбранная) ветка: ${{ github.ref_name }}"
+            exit 1
+          fi
 
       - name: Verify Git state on VM before deploy
         working-directory: /home/vboxuser/dockerproject/Site
