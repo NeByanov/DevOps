@@ -49,8 +49,8 @@ jobs:
             ghcr.io/nebyanov/devops:latest
             ghcr.io/nebyanov/devops:${{ github.sha }}
       - name: Show GHCR image digest
-          shell: bash
-          run: |
-            echo "### GHCR image" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Tag: \`ghcr.io/nebyanov/devops:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+        shell: bash
+        run: |
+          echo "### GHCR image" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: \`ghcr.io/nebyanov/devops:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
