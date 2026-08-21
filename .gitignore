@@ -12,6 +12,8 @@
 .secrets/
 /DevOps/
 kubeconfig*
+ForchatGPTPermission*
+
 # dependencies
 /node_modules
 /.pnp
