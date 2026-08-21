@@ -12,7 +12,7 @@
 .secrets/
 /DevOps/
 kubeconfig*
-
+.ssh
 # dependencies
 /node_modules
 /.pnp

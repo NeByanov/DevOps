@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: site-demo-container
-        image: nginx:1.31.3
+        image: nginx:1.31.4
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
