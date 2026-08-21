@@ -5,6 +5,11 @@ metadata:
   namespace: site-lab
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: site-demo
@@ -15,7 +20,7 @@ spec:
     spec:
       containers:
       - name: site-demo-container
-        image: nginx:1.31.4
+        image: nginx:1.31.3
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
