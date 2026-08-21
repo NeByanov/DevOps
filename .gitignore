@@ -11,7 +11,7 @@
 .grafana.env
 .secrets/
 /DevOps/
-
+kubeconfig*
 # dependencies
 /node_modules
 /.pnp
