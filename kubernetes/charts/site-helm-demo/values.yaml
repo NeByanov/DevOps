@@ -9,7 +9,7 @@ strategy:
 image:
   repository: nginx
   pullPolicy: IfNotPresent
-  tag: "1.31.4"
+  tag: "1.31.3"
 
 imagePullSecrets: []
 nameOverride: ""
