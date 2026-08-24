@@ -23,8 +23,8 @@ pageText: |
       <title>Site Helm Demo</title>
     </head>
     <body>
-      <h1>Site Helm Demo</h1>
-      <p>Страница создана из Helm values.</p>
+      <h1>Site Helm Demo Release B</h1>
+      <p>Страница создана из Helm values.Release B</p>
     </body>
   </html>
 
