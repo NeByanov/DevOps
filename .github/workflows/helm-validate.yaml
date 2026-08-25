@@ -7,6 +7,9 @@ on:
       - '.github/workflows/helm-validate.yaml'
   pull_request:
     branches: [ main ]
+    path:
+      - 'kubernetes/charts/site-helm-demo/**'
+      - '.github/workflows/helm-validate.yaml'
 
   workflow_dispatch:
 
