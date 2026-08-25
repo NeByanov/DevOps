@@ -1,0 +1,106 @@
+name: helm-validation
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'kubernetes/charts/site-helm-demo/**'
+      - '/home/vboxuser/dockerproject/Site/.github/workflows/helm-validate.yaml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'kubernetes/charts/site-helm-demo/**'
+      - '/home/vboxuser/dockerproject/Site/.github/workflows/helm-validate.yaml'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  helm_validation:
+    runs-on: self-hosted
+    timeout-minutes: 10
+
+    steps:
+      - name: Check branch is main
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "Ошибка: разрешено запускать только из ветки main."
+            echo "Текущая (выбранная) ветка: ${{ github.ref_name }}"
+            exit 1
+          fi
+
+      - name: Verify Git state on VM before deploy
+        working-directory: /home/vboxuser/dockerproject/Site
+        shell: bash
+        env:
+          EXPECTED_BRANCH: ${{ github.ref_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$EXPECTED_BRANCH" != "main" ]]; then
+            echo "::error::Разрешён запуск только из ветки main"
+            echo "Выбрана ветка: $EXPECTED_BRANCH"
+            exit 1
+          fi
+
+          CURRENT_BRANCH="$(git branch --show-current)"
+
+          if [[ "$CURRENT_BRANCH" != "main" ]]; then
+            echo "::error::На VM выбрана ветка $CURRENT_BRANCH вместо main"
+            exit 1
+          fi
+
+          GIT_STATE="$(git status --porcelain --untracked-files=normal)"
+
+          if [[ -n "$GIT_STATE" ]]; then
+            echo "::error::Рабочее дерево на VM содержит изменения"
+            printf '%s\n' "$GIT_STATE"
+            exit 1
+          fi
+
+          LOCAL_COMMIT="$(git rev-parse HEAD)"
+
+          if [[ "$LOCAL_COMMIT" != "$EXPECTED_COMMIT" ]]; then
+            echo "::error::Код на VM не соответствует commit запуска workflow"
+            echo "VM:     $LOCAL_COMMIT"
+            echo "GitHub: $EXPECTED_COMMIT"
+            exit 1
+          fi
+
+          echo "Git state verified"
+          echo "Branch: $CURRENT_BRANCH"
+          echo "Commit: $LOCAL_COMMIT"
+
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Helm v4.2.4
+        run: |
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get_helm.sh
+          chmod 700 get_helm.sh
+          ./get_helm.sh -v v4.2.4
+          helm version --short
+
+      - name: Validate configuration
+        run: helm lint .
+
+      - name: Render configuration
+        run: |
+          helm template site-release -n site-helm-lab --output-dir ./rendered-manifest ls  -R ./rendered-manifest
+
+
+      - name: Validate rendered manifests (grep)
+        run: |
+          set -euo pipefail
+          OUT=$(helm template site-release ./site-helm-demo --namespace site-helm-lab)
+
+          echo "$OUT" | grep -q "kind: ConfigMap"       && echo "OK: ConfigMap"
+          echo "$OUT" | grep -q "replicas: 2"           && echo "OK: replicas=2"
+          echo "$OUT" | grep -q "type: ClusterIP"       && echo "OK: ClusterIP"
+          echo "$OUT" | grep -q "nginx:1.31.4"          && echo "OK: image"
+          echo "$OUT" | grep -Eq "livenessProbe|readinessProbe|startupProbe" && echo "OK: probes"
+          echo "$OUT" | grep -q "requests:" && echo "$OUT" | grep -q "limits:" && echo "OK: resources"
+
+          echo "All render checks passed."
