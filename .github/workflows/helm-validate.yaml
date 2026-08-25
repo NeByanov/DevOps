@@ -25,11 +25,11 @@ jobs:
         id: install
 
       - name: Validate configuration
-        run: helm lint /home/vboxuser/dockerproject/Site/kubernetes/charts/site-helm-demo/
+        run: helm lint ./kubernetes/charts/site-helm-demo
 
       - name: Render configuration
         run: |
-          helm template /kubernetes/charts/site-helm-demo -n site-helm-lab --output-dir ./rendered-manifest
+          helm template ./kubernetes/charts/site-helm-demo -n site-helm-lab --output-dir ./rendered-manifest
 
       - name: Validate rendered manifests (grep)
         run: |
