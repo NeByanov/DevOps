@@ -31,7 +31,7 @@ jobs:
         id: install
 
       - name: Validate configuration
-        run: helm lint .
+        run: helm lint /home/vboxuser/dockerproject/Site/kubernetes/charts/site-helm-demo/
 
       - name: Render configuration
         run: |
