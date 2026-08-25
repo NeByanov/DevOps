@@ -35,7 +35,7 @@ jobs:
 
       - name: Render configuration
         run: |
-          helm template site-release -n site-helm-lab --output-dir ./rendered-manifest
+          helm template /home/vboxuser/dockerproject/Site/kubernetes/charts/site-helm-demo -n site-helm-lab --output-dir ./rendered-manifest
 
       - name: Validate rendered manifests (grep)
         run: |
