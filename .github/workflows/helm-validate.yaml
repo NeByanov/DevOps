@@ -20,7 +20,7 @@ jobs:
   helm_validation:
     runs-on: self-hosted
     timeout-minutes: 10
-
+    steps:
       - name: Check out source
         uses: actions/checkout@v6
 
