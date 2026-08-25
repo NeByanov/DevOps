@@ -35,8 +35,7 @@ jobs:
 
       - name: Render configuration
         run: |
-          helm template site-release -n site-helm-lab --output-dir ./rendered-manifest ls -R ./rendered-manifest
-
+          helm template site-release -n site-helm-lab --output-dir ./rendered-manifest
 
       - name: Validate rendered manifests (grep)
         run: |
