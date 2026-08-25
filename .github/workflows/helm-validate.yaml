@@ -4,6 +4,9 @@ on:
     branches: [ main ]
     paths:
       - 'kubernetes/charts/site-helm-demo/**'
+      - '.github/workflows/helm-validate.yaml'
+  pull_request:
+    branches: [ main ]
 
   workflow_dispatch:
 
@@ -29,7 +32,7 @@ jobs:
 
       - name: Render configuration
         run: |
-          helm template ./kubernetes/charts/site-helm-demo -n site-helm-lab --output-dir ./rendered-manifest
+          helm template site-release ./kubernetes/charts/site-helm-demo -n site-helm-lab --output-dir ./rendered-manifest
 
       - name: Validate rendered manifests (grep)
         run: |
