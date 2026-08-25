@@ -1,0 +1,8 @@
+ingress:
+  enabled: true
+  className: cloud-provider-kind
+  hosts:
+    - host: site.helm.test
+      paths:
+        - path: /
+          pathType: Prefix
