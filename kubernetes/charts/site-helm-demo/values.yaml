@@ -92,7 +92,7 @@ httpRoute:
   enabled: false
   annotations: {}
   parentRefs:
-    - name: gateway
+    - name: site-gateway
       sectionName: http
   hostnames:
     - chart-example.local

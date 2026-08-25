@@ -1,8 +1,10 @@
 ingress:
+  enabled: false
+
+httpRoute:
   enabled: true
-  className: cloud-provider-kind
-  hosts:
-    - host: site.helm.test
-      paths:
-        - path: /
-          pathType: Prefix
+  parentRefs:
+    - name: site-gateway
+      sectionName: http
+  hostnames:
+    - site.gateway.test
