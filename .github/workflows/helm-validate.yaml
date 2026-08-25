@@ -34,7 +34,7 @@ jobs:
       - name: Validate rendered manifests (grep)
         run: |
           set -euo pipefail
-          OUT=$(helm template site-release /home/vboxuser/dockerproject/Site/kubernetes/charts/site-helm-demo/ -n site-helm-lab)
+          OUT=$(helm template site-release ./kubernetes/charts/site-helm-demo/ -n site-helm-lab)
 
           echo "$OUT" | grep -q "kind: ConfigMap"       && echo "OK: ConfigMap"
           echo "$OUT" | grep -q "replicas: 2"           && echo "OK: replicas=2"
