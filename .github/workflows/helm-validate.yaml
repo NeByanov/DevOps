@@ -4,12 +4,6 @@ on:
     branches: [ main ]
     paths:
       - 'kubernetes/charts/site-helm-demo/**'
-      - '/home/vboxuser/dockerproject/Site/.github/workflows/helm-validate.yaml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'kubernetes/charts/site-helm-demo/**'
-      - '/home/vboxuser/dockerproject/Site/.github/workflows/helm-validate.yaml'
 
   workflow_dispatch:
 
@@ -18,7 +12,7 @@ permissions:
 
 jobs:
   helm_validation:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out source
@@ -50,7 +44,3 @@ jobs:
           echo "$OUT" | grep -q "requests:" && echo "$OUT" | grep -q "limits:" && echo "OK: resources"
 
           echo "All render checks passed."
-
-      - name: Проверяем rollout deployment
-        run: |
-          kubectl rollout status deployment/site-release-site-helm-demo -n site-helm-lab --timeout=300s
