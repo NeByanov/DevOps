@@ -42,7 +42,7 @@ jobs:
           cd ./kubernetes/charts/site-helm-demo
           helm template site-release . -f values-lab.yaml
 
-      - name:
+      - name: Check IP
         run: |
           GW_IP=$(kubectl get gateway site-gateway \
           -n site-helm-lab \
