@@ -37,7 +37,29 @@ jobs:
         run: |
           helm template site-release ./kubernetes/charts/site-helm-demo -n site-helm-lab --output-dir ./rendered-manifest
 
-      - name: Validate rendered manifests (grep)
+      - name: Render lab-values.yaml
+        run: |
+          helm template site-release ./kubernetes/charts/site-helm-demo/ -f values-lab.yaml
+
+      - name: Check HTTPRoute config
+        run: |
+          kubectl describe httproute \
+          site-release-site-helm-demo \
+          -n site-helm-lab
+
+      - name: Check HTTPRoute (status 200)
+        run: |
+          curl --noproxy '*' -i \
+          -H 'Host: site.gateway.test' \
+          "http://$GW_IP/"
+
+      - name: Check HTTPRoute (status 404)
+        run: |
+          curl --noproxy '*' -i \
+          -H 'Host: wrong.invalid' \
+          "http://$GW_IP/"
+
+    - name: Validate rendered manifests (grep)
         run: |
           set -euo pipefail
           OUT=$(helm template site-release ./kubernetes/charts/site-helm-demo/ -n site-helm-lab)
