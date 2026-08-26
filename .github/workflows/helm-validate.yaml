@@ -39,7 +39,8 @@ jobs:
 
       - name: Render lab-values.yaml
         run: |
-          helm template site-release ./kubernetes/charts/site-helm-demo/ -f values-lab.yaml
+          cd ./kubernetes/charts/site-helm-demo
+          helm template site-release . -f values-lab.yaml
 
       - name: Check HTTPRoute config
         run: |
