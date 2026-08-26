@@ -59,7 +59,7 @@ jobs:
           -H 'Host: wrong.invalid' \
           "http://$GW_IP/"
 
-    - name: Validate rendered manifests (grep)
+      - name: Validate rendered manifests (grep)
         run: |
           set -euo pipefail
           OUT=$(helm template site-release ./kubernetes/charts/site-helm-demo/ -n site-helm-lab)
