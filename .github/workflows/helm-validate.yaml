@@ -42,10 +42,6 @@ jobs:
           cd ./kubernetes/charts/site-helm-demo
           helm template site-release . -f values-lab.yaml
 
-      - name: Check HTTPRoute config
-        run: |
-          kubectl describe httproute site-release-site-helm-demo -n site-helm-lab
-
       - name: Check HTTPRoute (status 200)
         run: |
           curl --noproxy '*' -i \
