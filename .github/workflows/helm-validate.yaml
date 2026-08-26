@@ -44,6 +44,7 @@ jobs:
 
       - name: Check HTTPRoute config
         run: |
+          cd ./kubernetes/charts/site-helm-demo
           kubectl describe httproute \
           site-release-site-helm-demo \
           -n site-helm-lab
