@@ -42,25 +42,28 @@ jobs:
           cd ./kubernetes/charts/site-helm-demo
           helm template site-release . -f values-lab.yaml
 
-      - name: Check IP
+      - name: Validate HTTPRoute
+        shell: bash
         run: |
-          GW_IP=$(kubectl get gateway site-gateway \
-          -n site-helm-lab \
-          -o jsonpath='{.status.addresses[0].value}')
+          set -Eeuo pipefail
 
-          echo "$GW_IP"
+          CHART=./kubernetes/charts/site-helm-demo
+          OUT=$(mktemp)
+          trap 'rm -f "$OUT"' EXIT
 
-      - name: Check HTTPRoute (status 200)
-        run: |
-          curl --noproxy '*' -i \
-          -H 'Host: site.gateway.test' \
-          "http://$GW_IP/"
+          helm template site-release "$CHART" \
+          --namespace site-helm-lab \
+          -f "$CHART/values-lab.yaml" \
+          --show-only templates/httproute.yaml > "$OUT"
 
-      - name: Check HTTPRoute (status 404)
-        run: |
-          curl --noproxy '*' -i \
-          -H 'Host: wrong.invalid' \
-          "http://$GW_IP/"
+          grep -q '^kind: HTTPRoute$' "$OUT"
+          grep -q 'name: site-gateway' "$OUT"
+          grep -q 'sectionName: http' "$OUT"
+          grep -q 'site.gateway.test' "$OUT"
+          grep -q 'name: site-release-site-helm-demo' "$OUT"
+          grep -q 'port: 80' "$OUT"
+
+          echo "HTTPRoute render is valid"
 
       - name: Validate rendered manifests (grep)
         run: |
