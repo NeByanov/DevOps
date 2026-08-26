@@ -1,36 +1,27 @@
-- name: Collect facts
+- name: Configure lab VM
   hosts: lab_vm1
-  gather_facts: yes
-  become: true
-  become_method: sudo
-  become_user: root
+  gather_facts: true
+
   tasks:
+    - name: Install required packages
+      become: true
+      ansible.builtin.apt:
+        name:
+          - curl
+          - jq
+        state: present
+        update_cache: true
 
-  - name: Install curl
-    apt:
-      name: curl
-      state: present
+    - name: Check Docker Compose availability
+      become: false
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - version
+      register: compose_version
+      changed_when: false
 
-  - name: Install jq
-    apt:
-      name: jq
-      state: present
-
-  - name: Ensure Docker service is enabled and started
-    service:
-      name: docker
-      state: started
-      enabled: yes
-
-  - name: Check Docker Compose availability
-    ansible.builtin.command:
-      argv:
-        - docker
-        - compose
-        - version
-    register: docker_compose_check
-    changed_when: false
-
-  - name: Show Docker Compose version
-    ansible.builtin.debug:
-      var: docker_compose_check.stdout
+    - name: Show Docker Compose version
+      ansible.builtin.debug:
+        msg: "{{ compose_version.stdout }}"
