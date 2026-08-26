@@ -1,0 +1,36 @@
+- name: Collect facts
+  hosts: lab_vm1
+  gather_facts: yes
+  become: true
+  become_method: sudo
+  become_user: root
+  tasks:
+
+  - name: Install curl
+    apt:
+      name: curl
+      state: present
+
+  - name: Install jq
+    apt:
+      name: jq
+      state: present
+
+  - name: Ensure Docker service is enabled and started
+    service:
+      name: docker
+      state: started
+      enabled: yes
+
+  - name: Check Docker Compose availability
+    ansible.builtin.command:
+      argv:
+        - docker
+        - compose
+        - version
+    register: docker_compose_check
+    changed_when: false
+
+  - name: Show Docker Compose version
+    ansible.builtin.debug:
+      var: docker_compose_check.stdout

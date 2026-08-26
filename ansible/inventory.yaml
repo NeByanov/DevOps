@@ -1,0 +1,10 @@
+all:
+  children:
+    lab_vm:
+      hosts:
+        lab_vm1:
+          ansible_host: 127.0.0.1
+
+  vars:
+    ansible_user: vboxuser
+    ansible_ssh_private_key_file: /home/vboxuser/.ssh/id_ed25519foransible
