@@ -42,17 +42,25 @@ jobs:
           cd ./kubernetes/charts/site-helm-demo
           helm template site-release . -f values-lab.yaml
 
+      - name:
+        run: |
+          GW_IP=$(kubectl get gateway site-gateway \
+          -n site-helm-lab \
+          -o jsonpath='{.status.addresses[0].value}')
+
+          echo "$GW_IP"
+
       - name: Check HTTPRoute (status 200)
         run: |
           curl --noproxy '*' -i \
           -H 'Host: site.gateway.test' \
-          "http://172.25.0.3/"
+          "http://$GW_IP/"
 
       - name: Check HTTPRoute (status 404)
         run: |
           curl --noproxy '*' -i \
           -H 'Host: wrong.invalid' \
-          "http://172.25.0.4/"
+          "http://$GW_IP/"
 
       - name: Validate rendered manifests (grep)
         run: |
