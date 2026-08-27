@@ -37,13 +37,18 @@
         that: log_stat.stat.exists
         msg: "Лог {{ site_backup_log_path }} отсутствует"
 
-    - name: Dry-run проверка конфигурации logrotate
+    - name: Dry-run check configuration logrotate
       ansible.builtin.command: logrotate -d -s /dev/null /etc/logrotate.d/site-backup
       register: logrotate_dry_run
       changed_when: false
       failed_when: false
 
-    - name: Dry-run dont message owner
+    - name: Dry-run completed successfull (rc == 0)
+      ansible.builtin.assert:
+        that: logrotate_dry_run.rc == 0
+        msg: "Dry-run вернул ошибку (rc={{ logrotate_dry_run.rc }}): {{ logrotate_dry_run.stderr }}"
+
+    - name: Dry-run не сообщил об ошибке доступа
       ansible.builtin.assert:
         that: "'permission denied' not in (logrotate_dry_run.stderr | lower)"
         msg: "Dry-run: ошибка доступа к state-файлу: {{ logrotate_dry_run.stderr }}"

@@ -2,12 +2,14 @@
   ansible.builtin.apt:
     name: logrotate
     state: present
+  become: true
 
 - name: Enable and start timer
   ansible.builtin.systemd:
     name: logrotate.timer
     enabled: true
     state: started
+  become: true
 
 - name: copypaste rule rotate
   become: true
