@@ -1,7 +1,6 @@
 - name: Verify lab VM configuration
   hosts: lab_vm
   gather_facts: true
-  become: true
 
   tasks:
     - name: Verify OS and network facts
@@ -65,7 +64,7 @@
         that:
           - result.status == 200
           - health.status == "ok"
-          - health.database in ["ok", "connected", "healthy"]
+          - health.database in ["connected"]
         fail_msg: >-
           Health check failed. HTTP {{ result.status | default('unreachable') }}.
           Response: {{ result.content | default('empty') }}
