@@ -21,14 +21,3 @@
           - version
       register: compose_version
       changed_when: false
-
-    - name: Docker service started and enabled
-      become: true
-      service:
-        name: docker
-        state: started
-        enabled: yes
-
-    - name: Show Docker Compose version
-      ansible.builtin.debug:
-        msg: "{{ compose_version.stdout }}"
