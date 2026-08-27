@@ -1,0 +1,6 @@
+site_backup_log_path: /var/log/vbox/backupdb.log
+site_backup_period: daily
+site_backup_rotate: 7
+site_backup_log_user: vboxuser
+site_backup_log_group: vboxuser
+site_backup_log_mode: "0640"

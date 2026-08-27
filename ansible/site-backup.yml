@@ -1,0 +1,4 @@
+- name: use configuration on site
+  hosts: lab_vm
+  roles:
+    - site_backup_logrotate

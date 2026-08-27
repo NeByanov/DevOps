@@ -1,0 +1,9 @@
+{{ site_backup_log_path }} {
+    {{ site_backup_period }}
+    rotate {{ site_backup_rotate }}
+    compress
+    missingok
+    notifempty
+    create {{ site_backup_log_mode }} {{ site_backup_log_user }} {{ site_backup_log_group }}
+    su {{ site_backup_log_user }} {{ site_backup_log_group }}
+}

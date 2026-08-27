@@ -1,0 +1,20 @@
+- name: Install required packages
+  ansible.builtin.apt:
+    name: logrotate
+    state: present
+
+- name: Enable and start timer
+  ansible.builtin.systemd:
+    name: logrotate.timer
+    enabled: true
+    state: started
+
+- name: copypaste rule rotate
+  become: true
+  ansible.builtin.template:
+    src: site-backup.j2
+    dest: /etc/logrotate.d/site-backup
+    owner: root
+    group: root
+    mode: "0644"
+    validate: logrotate -d %s

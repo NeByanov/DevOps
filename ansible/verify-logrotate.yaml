@@ -1,0 +1,59 @@
+- name: Check configuration
+  hosts: lab_vm
+  gather_facts: false
+  tasks:
+
+    - name: Check Taimer enabled
+      ansible.builtin.command: systemctl is-enabled logrotate.timer
+      register: timer_enabled
+      changed_when: false
+      failed_when: timer_enabled.rc != 0
+
+    - name: Taimer logrotate active
+      ansible.builtin.command: systemctl is-active logrotate.timer
+      register: timer_active
+      changed_when: false
+      failed_when: timer_active.rc != 0
+
+    - name: collect rules
+      ansible.builtin.stat:
+        path: /etc/logrotate.d/site-backup
+      register: rule_stat
+
+    - name: rules entity
+      ansible.builtin.assert:
+        that:
+          - rule_stat.stat.exists
+          - rule_stat.stat.mode == "0644"
+        msg: "Правило /etc/logrotate.d/site-backup отсутствует или нет прав"
+
+    - name: collect logs
+      ansible.builtin.stat:
+        path: "{{ site_backup_log_path }}"
+      register: log_stat
+
+    - name: logs exist
+      ansible.builtin.assert:
+        that: log_stat.stat.exists
+        msg: "Лог {{ site_backup_log_path }} отсутствует"
+
+    - name: Dry-run проверка конфигурации logrotate
+      ansible.builtin.command: logrotate -d -s /dev/null /etc/logrotate.d/site-backup
+      register: logrotate_dry_run
+      changed_when: false
+      failed_when: false
+
+    - name: Dry-run dont message owner
+      ansible.builtin.assert:
+        that: "'permission denied' not in (logrotate_dry_run.stderr | lower)"
+        msg: "Dry-run: ошибка доступа к state-файлу: {{ logrotate_dry_run.stderr }}"
+
+    - name: Log skipped because nothing collect
+      ansible.builtin.assert:
+        that: "'does not exist' not in (logrotate_dry_run.stderr | lower)"
+        msg: "Dry-run: лог {{ site_backup_log_path }} не найден: {{ logrotate_dry_run.stderr }}"
+
+    - name: Rules check logs
+      ansible.builtin.assert:
+        that: "'considering log' in (logrotate_dry_run.stderr | lower)"
+        msg: "Dry-run не обработал лог: {{ logrotate_dry_run.stderr }}"
