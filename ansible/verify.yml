@@ -12,28 +12,24 @@
           IP: {{ ansible_default_ipv4.address }}
           Gateway: {{ ansible_default_ipv4.gateway | default('N/A') }}
 
-
-    - name: Docker service started and enabled
-      service:
-        name: docker
-        state: started
-        enabled: yes
+    - name: Check Docker Compose availability
+      become: false
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - version
+      register: compose_version
       changed_when: false
 
     - name: Check systemctl docker status
       ansible.builtin.command:
         cmd: systemctl status docker.service
       changed_when: false
+      register: docker_compose
 
-    - name: Check is docer compose installed
-      shell: command -v docker compose >/dev/null 2>&1
-      register: is_docker_compose_install
-      ignore_errors: yes
-      changed_when: false
-
-    - debug: msg="{{ is_docker_compose_install.rc }}" # it returns rc 0 if installed or 127 if not
-    - debug: var=is_docker_compose_install
-
+    - debug:
+        var: docker_compose
 
     - name: Show Docker Compose version
       ansible.builtin.command:

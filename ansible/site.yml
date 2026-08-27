@@ -12,12 +12,10 @@
         state: present
         update_cache: true
 
-    - name: Check Docker Compose availability
-      become: false
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - version
-      register: compose_version
+    - name: Docker service started and enabled
+      service:
+        name: docker
+        state: started
+        enabled: yes
       changed_when: false
+
