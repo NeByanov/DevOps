@@ -13,9 +13,9 @@
         update_cache: true
 
     - name: Docker service started and enabled
+      become: true
       service:
         name: docker
         state: started
         enabled: yes
-      changed_when: false
 

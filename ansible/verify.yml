@@ -1,48 +1,68 @@
 - name: Configure lab VM
-  hosts: lab_vm
+  hosts: lab_vm1
   gather_facts: true
 
   tasks:
+    # Проверка ОС и сети — теперь через ansible_facts
+    - name: Verify OS and network facts
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == "Debian"
+          - ansible_facts['default_ipv4']['address'] is defined
+          - ansible_facts['default_ipv4']['gateway'] is defined
+        fail_msg: "Unexpected OS or network config"
+        success_msg: "OS and network facts OK"
 
-    - name: Check facts
-      ansible.builtin.debug:
-        msg: |
-          Host: {{ inventory_hostname }}
-          OS: {{ ansible_os_family }} {{ ansible_distribution }} {{ ansible_distribution_version }}
-          IP: {{ ansible_default_ipv4.address }}
-          Gateway: {{ ansible_default_ipv4.gateway | default('N/A') }}
+    - name: Populate service facts
+      ansible.builtin.service_facts:
+
+    # Более мягкая проверка: сначала смотрим, есть ли сервис вообще, потом — запущен ли он
+    - name: Verify required services are present and running
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts['services']
+          - ansible_facts['services'][item]['state'] == "running"
+        fail_msg: "Service {{ item }} missing or not running (state: {{ ansible_facts['services'][item]['state'] | default('NOT_FOUND') }})"
+      loop:
+        - docker.service
+    #можно добавить доп строчки с сервисами
 
     - name: Check Docker Compose availability
       become: false
       ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - version
+        argv: [docker, compose, version]
       register: compose_version
       changed_when: false
+
+    - name: Verify Docker Compose available
+      ansible.builtin.assert:
+        that: compose_version.rc == 0
+        fail_msg: "Docker Compose unavailable: {{ compose_version.stderr | default('') }}"
 
     - name: Check systemctl docker status
       ansible.builtin.command:
         cmd: systemctl status docker.service
       changed_when: false
       register: docker_compose
+      failed_when: false
 
-    - debug:
-        var: docker_compose
+    - name: Verify Docker active
+      ansible.builtin.assert:
+        that:
+          - "docker_compose.stdout is search('Active: active')"
+          - "docker_compose.stdout is search('Loaded: loaded')"
+        fail_msg: "Docker service not active/enabled"
 
-    - name: Show Docker Compose version
-      ansible.builtin.command:
-        cmd:
-          docker compose version
-      changed_when: false
-
-    - name: Check HTTP status
+    - name: Check HTTP health endpoint
       ansible.builtin.uri:
-        url: http://192.168.56.101/api/health
+        url: https://127.0.0.1/api/health
         validate_certs: false
         return_content: true
       register: result
 
-    - debug:
-        var: result
+    - name: Verify health endpoint responds
+      ansible.builtin.assert:
+        that:
+          - result.status == 200
+          - result.content is search('ok')
+        fail_msg: "Health endpoint failed: status {{ result.status | default('unreachable') }}"
