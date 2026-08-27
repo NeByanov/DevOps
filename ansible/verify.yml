@@ -1,13 +1,14 @@
-- name: Configure lab VM
-  hosts: lab_vm1
+- name: Verify lab VM configuration
+  hosts: lab_vm
   gather_facts: true
+  become: true
 
   tasks:
-    # Проверка ОС и сети — теперь через ansible_facts
     - name: Verify OS and network facts
       ansible.builtin.assert:
         that:
           - ansible_facts['os_family'] == "Debian"
+          - ansible_facts['distribution'] in ["Ubuntu", "Debian"]
           - ansible_facts['default_ipv4']['address'] is defined
           - ansible_facts['default_ipv4']['gateway'] is defined
         fail_msg: "Unexpected OS or network config"
@@ -16,8 +17,7 @@
     - name: Populate service facts
       ansible.builtin.service_facts:
 
-    # Более мягкая проверка: сначала смотрим, есть ли сервис вообще, потом — запущен ли он
-    - name: Verify required services are present and running
+    - name: Verify required system services are running
       ansible.builtin.assert:
         that:
           - item in ansible_facts['services']
@@ -25,7 +25,17 @@
         fail_msg: "Service {{ item }} missing or not running (state: {{ ansible_facts['services'][item]['state'] | default('NOT_FOUND') }})"
       loop:
         - docker.service
-    #можно добавить доп строчки с сервисами
+      # можно добавить ещё сервисов
+    - name: Verify Docker is enabled at boot
+      ansible.builtin.assert:
+        that:
+          - "'docker.service' in ansible_facts['services']"
+          - ansible_facts['services']['docker.service']['state'] == "running"
+          - ansible_facts['services']['docker.service']['status'] == "enabled"
+        fail_msg: >-
+          Docker must be running and enabled at boot.
+          State: {{ ansible_facts['services']['docker.service']['state'] | default('NOT_FOUND') }},
+          status: {{ ansible_facts['services']['docker.service']['status'] | default('NOT_FOUND') }}
 
     - name: Check Docker Compose availability
       become: false
@@ -34,24 +44,12 @@
       register: compose_version
       changed_when: false
 
-    - name: Verify Docker Compose available
-      ansible.builtin.assert:
-        that: compose_version.rc == 0
-        fail_msg: "Docker Compose unavailable: {{ compose_version.stderr | default('') }}"
-
-    - name: Check systemctl docker status
-      ansible.builtin.command:
-        cmd: systemctl status docker.service
-      changed_when: false
-      register: docker_compose
-      failed_when: false
-
-    - name: Verify Docker active
+    - name: Verify Docker Compose is available
       ansible.builtin.assert:
         that:
-          - "docker_compose.stdout is search('Active: active')"
-          - "docker_compose.stdout is search('Loaded: loaded')"
-        fail_msg: "Docker service not active/enabled"
+          - compose_version.rc == 0
+          - "compose_version.stdout is search('version')"
+        fail_msg: "Docker Compose unavailable: {{ compose_version.stderr | default('') }}"
 
     - name: Check HTTP health endpoint
       ansible.builtin.uri:
@@ -60,9 +58,23 @@
         return_content: true
       register: result
 
-    - name: Verify health endpoint responds
+    - name: Verify API health and database status
+      vars:
+        health: "{{ result.content | from_json }}"
       ansible.builtin.assert:
         that:
           - result.status == 200
-          - result.content is search('ok')
-        fail_msg: "Health endpoint failed: status {{ result.status | default('unreachable') }}"
+          - health.status == "ok"
+          - health.database in ["ok", "connected", "healthy"]
+        fail_msg: >-
+          Health check failed. HTTP {{ result.status | default('unreachable') }}.
+          Response: {{ result.content | default('empty') }}
+
+  post_tasks:
+    - name: Print verification summary
+      ansible.builtin.debug:
+        msg: |
+          Host {{ inventory_hostname }} verified:
+          - OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+          - IP: {{ ansible_facts['default_ipv4']['address'] }}
+          - Docker: running, enabled, Compose {{ compose_version.stdout | default('n/a') }}
