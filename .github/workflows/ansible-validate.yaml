@@ -43,10 +43,6 @@ jobs:
           ansible-playbook --syntax-check site-backup.yml -i inventory.yml
           ansible-playbook --syntax-check verify-logrotate.yml -i inventory.yml
 
-      - name: Clean up SSH key
-        if: always()
-        run: rm -f private_key.pem
-
   deploy:
     name: Deploy
     runs-on: self-hosted
@@ -58,19 +54,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Install Ansible
-        shell: bash
-        run: |
-          sudo apt update
-          sudo apt install -y ansible
-
       - name: Run Ansible playbook
         run: |
           ansible-playbook verify.yml -i inventory.yml
           ansible-playbook verify-logrotate.yml -i inventory.yml
-
-
-      - name: Clean up SSH key
-        if: always()
-        run: rm -f private_key.pem
-
