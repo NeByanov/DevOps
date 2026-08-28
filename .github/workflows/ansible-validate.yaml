@@ -53,5 +53,6 @@ jobs:
           echo "${{ secrets.SSHPRIVATEKEY }}" > private_key.pem
           chmod 600 private_key.pem
       - name: Run Ansible playbook
-        run: ansible-playbook verify.yml -i inventory.yaml
-        run: ansible-playbook verify-logrotate.yml -i inventory.yaml
+        run: |
+          ansible-playbook verify.yml -i inventory.yaml
+          ansible-playbook verify-logrotate.yml -i inventory.yaml
