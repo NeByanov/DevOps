@@ -73,7 +73,7 @@ jobs:
       - name: Run Ansible playbook
         run: |
           ansible-playbook verify.yml -i inventory.yml
-          ansible-playbook verify-logrotate.yaml -i inventory.yml
+          ansible-playbook verify-logrotate.yml -i inventory.yml
 
 
       - name: Clean up SSH key
