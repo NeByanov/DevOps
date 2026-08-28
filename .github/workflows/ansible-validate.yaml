@@ -55,8 +55,6 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Ansible playbook
-        env:
-          PATH: /home/vboxuser/.local/bin:/usr/local/bin:/usr/bin:/bin
         run: |
           ansible-playbook verify.yml -i inventory.yml
           ansible-playbook verify-logrotate.yml -i inventory.yml
