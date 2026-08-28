@@ -42,7 +42,7 @@ jobs:
           ansible-playbook --syntax-check site.yml
           ansible-playbook --syntax-check verify.yml
           ansible-playbook --syntax-check site-backup.yml
-          ansible-playbook --syntax-check verify-logrotate.yaml
+          ansible-playbook --syntax-check verify-logrotate.yml
 
       - name: Clean up SSH key
         if: always()
