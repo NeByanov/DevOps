@@ -39,10 +39,11 @@ jobs:
 
       - name: Syntax-Check
         run: |
-          ansible-playbook --syntax-check site.yml
-          ansible-playbook --syntax-check verify.yml
-          ansible-playbook --syntax-check site-backup.yml
-          ansible-playbook --syntax-check verify-logrotate.yml
+          set -euo pipefail
+          ansible-playbook --syntax-check site.yml -i inventory.yml
+          ansible-playbook --syntax-check verify.yml -i inventory.yml
+          ansible-playbook --syntax-check site-backup.yml -i inventory.yml
+          ansible-playbook --syntax-check verify-logrotate.yml -i inventory.yml
 
       - name: Clean up SSH key
         if: always()
