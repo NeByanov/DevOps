@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  helm_validation:
+  syntax-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
