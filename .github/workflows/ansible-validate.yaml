@@ -44,6 +44,10 @@ jobs:
           ansible-playbook --syntax-check site-backup.yml
           ansible-playbook --syntax-check verify-logrotate.yaml
 
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f private_key.pem
+
   deploy:
     name: Deploy
     runs-on: self-hosted
@@ -52,6 +56,9 @@ jobs:
     needs: syntax-check
 
     steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
       - name: Set up SSH
         run: |
           echo "${{ secrets.SSHPRIVATEKEY }}" > private_key.pem
@@ -61,3 +68,9 @@ jobs:
         run: |
           ansible-playbook verify.yml -i inventory.yaml
           ansible-playbook verify-logrotate.yml -i inventory.yaml
+
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f private_key.pem
+
