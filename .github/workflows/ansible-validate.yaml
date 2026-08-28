@@ -19,7 +19,8 @@ jobs:
 
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
+    defaults:
+      working-directory: ./ansible
     steps:
       - name: Check out source
         uses: actions/checkout@v6
