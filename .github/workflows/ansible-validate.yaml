@@ -34,3 +34,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y ansible
+
+      - name: Syntax-Check
+        run: |
+          ansible-playbook --syntax-check site.yml
