@@ -64,6 +64,12 @@ jobs:
           echo "${{ secrets.SSHPRIVATEKEY }}" > private_key.pem
           chmod 600 private_key.pem
 
+      - name: Install Ansible
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install -y ansible
+
       - name: Run Ansible playbook
         run: |
           ansible-playbook verify.yml -i inventory.yaml
