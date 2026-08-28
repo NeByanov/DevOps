@@ -13,6 +13,19 @@
 /DevOps/
 kubeconfig*
 .ssh
+# State files
+*.tfstate
+*.tfstate.*
+
+# Backup state files (часто появляются при apply)
+*.backup
+
+# Provider cache directory (зависит от версии и ОС, но обычно это .terraform)
+.terraform/
+
+# Исключаем lock-файл провайдеров — он должен быть в Git
+!.terraform.lock.hcl
+
 # dependencies
 /node_modules
 /.pnp
