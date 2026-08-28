@@ -14,7 +14,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  syntax_check:
+  check:
+    name: syntax-check
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
