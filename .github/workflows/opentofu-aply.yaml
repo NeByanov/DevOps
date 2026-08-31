@@ -1,15 +1,13 @@
 name: opentofu-apply
 on:
   workflow_dispatch:
-    inputs:
-      path:
-        description: "Путь к директории с .tf файлами"
-        required: true
-        default: "/home/vboxuser/dockerproject/Site/opentofu/docker-lab"
 
 concurrency:
   group: opentofu
   cancel-in-progress: false
+defaults:
+  run:
+    working-directory: ./opentofu/docker-lab
 jobs:
   tofu-apply:
     name: plan-check
@@ -31,7 +29,6 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
       - name: Check all config and format
-        working-directory: ${{ inputs.path }}
         run: |
           tofu --version
           tofu init
@@ -40,17 +37,24 @@ jobs:
           tofu fmt -check -recursive
           tofu validate
 
-      - name: Build Plan (in-memory)
-        working-directory: ${{ inputs.path }}
-        # План пишем во временный файл, но не сохраняем его как артефакт
-        run: tofu plan -out=tfplan
+      - name: Build Plan
+        run: |
+          # Строим план и сохраняем в файл.
+          # Даже если есть изменения (exit 2), файл tfplan будет создан.
+          tofu plan -out=tfplan
+
+          # Опционально: логируем, что изменения есть, но не ломаем job
+          if [ $? -eq 2 ]; then
+            echo "::notice::Plan has changes (exit code 2). Review the plan before applying."
+          elif [ $? -ne 0 ]; then
+            echo "::error::Plan failed with unexpected error."
+            exit 1
+          fi
 
       - name: Apply Saved Plan
-        working-directory: ${{ inputs.path }}
         run: tofu apply -auto-approve tfplan
 
       - name: Cleanup Plan File
-        working-directory: ${{ inputs.path }}
         if: always()
         run: rm -f tfplan
 
