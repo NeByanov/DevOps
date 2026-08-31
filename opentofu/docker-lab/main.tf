@@ -40,4 +40,7 @@ resource "docker_container" "tofu_lab_web" {
     label = "opentofu.managed"
     value = "true"
   }
+  labels = {
+    lab-label = "check-plan-apply"
+  }
 }
