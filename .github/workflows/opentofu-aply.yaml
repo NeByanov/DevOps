@@ -1,0 +1,58 @@
+name: opentofu-plan
+on:
+  workflow_dispatch:
+    inputs:
+      path:
+        description: "Путь к директории с .tf файлами"
+        required: true
+        default: ".
+
+concurrency:
+  group: opentofu
+  cancel-in-progress: false
+jobs:
+  syntax-check:
+    name: plan-check
+    runs-on: self-hosted
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./opentofu/docker-lab/
+    steps:
+      - name: Check branch is main
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "Ошибка: разрешено запускать только из ветки main."
+            echo "Текущая (выбранная) ветка: ${{ github.ref_name }}"
+            exit 1
+          fi
+
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Check all config and format
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          tofu --version
+          tofu init
+          tofu state list
+          tofu plan -detailed-exitcode
+          tofu fmt -check -recursive
+          tofu validate
+          curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8888/
+
+      - name: Build Plan (in-memory)
+        working-directory: ${{ inputs.path }}
+        # План пишем во временный файл, но не сохраняем его как артефакт
+        run: tofu plan -out=tfplan
+
+      - name: Apply Saved Plan
+        working-directory: ${{ inputs.path }}
+        run: tofu apply -auto-approve tfplan
+
+      - name: Cleanup Plan File
+        working-directory: ${{ inputs.path }}
+        if: always()
+        run: rm -f tfplan
