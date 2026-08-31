@@ -33,7 +33,7 @@ resource "docker_container" "tofu_lab_web" {
 
   labels {
     label = "project"
-    value = "tofu-lab1"
+    value = "tofu-lab"
   }
 
   labels {
