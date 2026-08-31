@@ -40,4 +40,9 @@ resource "docker_container" "tofu_lab_web" {
     label = "opentofu.managed"
     value = "true"
   }
+  # ВОТ НОВАЯ МЕТКА — для проверки
+  labels {
+    label = "lab-label"
+    value = "check-plan-apply"
+  }
 }
