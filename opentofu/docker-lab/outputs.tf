@@ -1,6 +1,6 @@
 
 output "web_endpoint" {
-  description = "Локальный адрес Nginx"
+  description = "Локальный адрес Nginx123"
   value       = "http://127.0.0.1:${var.web_port}"
 }
 
