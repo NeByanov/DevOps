@@ -37,26 +37,30 @@ jobs:
           tofu fmt -check -recursive
           tofu validate
 
-      - name: Build Plan
+      - name: Generate Plan
         run: |
-          echo "Generating plan..."
+          echo "Running tofu plan..."
+          # Флаг -out обязателен! Без него apply не сработает.
           tofu plan -out=tfplan
-          PLAN_EXIT_CODE=$?
-
-          if [ "$PLAN_EXIT_CODE" -eq 0 ]; then
-            echo "::notice::No changes detected (exit code 0)."
-          elif [ "$PLAN_EXIT_CODE" -eq 2 ]; then
-            echo "::notice::Plan has changes (exit code 2). Review before applying."
-            # Здесь НЕ делаем exit 1 — мы хотим, чтобы job продолжил работу, если дальше будет apply
+          
+          EXIT_CODE=$?
+          
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "::notice::Infrastructure is up-to-date. No changes needed."
+            # Можно даже пропустить apply, но для простоты оставим
+          elif [ "$EXIT_CODE" -eq 2 ]; then
+            echo "::notice::Changes detected (code 2). Plan file 'tfplan' created. Moving to apply..."
+            # Важно: НЕ делаем exit 1, чтобы job пошел дальше
           else
-            echo "::error::Plan failed with unexpected error (exit code $PLAN_EXIT_CODE)."
+            echo "::error::Plan failed unexpectedly (code $EXIT_CODE)"
             exit 1
           fi
 
-      - name: Apply Saved Plan
+      # 6. Apply (сработает только если шаг 5 не вернул exit 1)
+      - name: Apply Changes
         run: tofu apply -auto-approve tfplan
 
+      # 7. Очистка
       - name: Cleanup Plan File
         if: always()
         run: rm -f tfplan
-
