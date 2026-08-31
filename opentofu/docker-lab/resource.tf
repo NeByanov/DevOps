@@ -1,7 +1,7 @@
 variable "nginx" {
   description = "Docker-образ Nginx"
   type        = string
-  default     = "nginx:1.31.4"  
+  default     = "nginx:1.31.4"
 }
 
 variable "web_port" {
