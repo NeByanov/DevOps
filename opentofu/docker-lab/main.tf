@@ -8,7 +8,7 @@ resource "docker_image" "nginx" {
 }
 
 resource "docker_container" "tofu_lab_web" {
-  name  = "tofu-lab-web1"
+  name  = "tofu-lab-web"
   image = docker_image.nginx.image_id
 
   networks_advanced {
