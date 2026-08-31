@@ -1,0 +1,30 @@
+name: opentofu-plan
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'opentofu/docker-lab/**'
+      - 'opentofu/state-backend/**'
+      - '.github/workflows/opentofu-plan.yaml'
+
+workflow_dispatch:
+jobs:
+  syntax-check:
+    name: plan-check
+    runs-on: self-hosted
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./opentofu/docker-lab/
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Check all config and format
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          tofu state list
+          tofu plan -detailed-exitcode
+          curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8888/
