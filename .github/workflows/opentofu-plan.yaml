@@ -8,6 +8,10 @@ on:
       - '.github/workflows/opentofu-plan.yaml'
 
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   syntax-check:
     name: plan-check
