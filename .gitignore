@@ -7,6 +7,8 @@
 /auto_backups/
 /nginx/certs/
 *.env*
+*.env
+.env
 /actions-runner/
 .grafana.env
 .secrets/
@@ -16,7 +18,9 @@ kubeconfig*
 # State files
 *.tfstate
 *.tfstate.*
-
+*.tfplan
+*.plan
+.aws/
 # Backup state files (часто появляются при apply)
 *.backup
 
