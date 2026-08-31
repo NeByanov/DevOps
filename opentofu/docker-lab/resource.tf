@@ -2,7 +2,10 @@ variable "nginx" {
   description = "Docker-образ Nginx"
   type        = string
   default     = "nginx:1.31.4"
-  restart = "unless-stopped"
+  
+  labels = {
+    lab-label = "check-plan-apply"
+  }
 }
 
 variable "web_port" {
