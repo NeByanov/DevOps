@@ -21,6 +21,7 @@ kubeconfig*
 *.tfplan
 *.plan
 .aws/
+*.license
 # Backup state files (часто появляются при apply)
 *.backup
 
