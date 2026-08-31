@@ -1,4 +1,4 @@
-name: opentofu-plan
+name: opentofu-apply
 on:
   workflow_dispatch:
     inputs:
@@ -11,7 +11,7 @@ concurrency:
   group: opentofu
   cancel-in-progress: false
 jobs:
-  syntax-check:
+  tofu-apply:
     name: plan-check
     runs-on: self-hosted
     timeout-minutes: 10
