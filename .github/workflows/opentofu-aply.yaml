@@ -5,7 +5,7 @@ on:
       path:
         description: "Путь к директории с .tf файлами"
         required: true
-        default: "."
+        default: "/home/vboxuser/dockerproject/Site/opentofu/docker-lab"
 
 concurrency:
   group: opentofu
