@@ -7,7 +7,7 @@ on:
       - 'opentofu/state-backend/**'
       - '.github/workflows/opentofu-plan.yaml'
 
-workflow_dispatch:
+  workflow_dispatch:
 jobs:
   syntax-check:
     name: plan-check
