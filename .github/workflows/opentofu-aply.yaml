@@ -38,7 +38,6 @@ jobs:
           tofu validate
 
       - name: Build Plan
-        working-directory: ${{ inputs.path }}
         run: |
           echo "Generating plan..."
           tofu plan -out=tfplan
