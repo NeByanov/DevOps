@@ -38,16 +38,19 @@ jobs:
           tofu validate
 
       - name: Build Plan
+        working-directory: ${{ inputs.path }}
         run: |
-          # Строим план и сохраняем в файл.
-          # Даже если есть изменения (exit 2), файл tfplan будет создан.
+          echo "Generating plan..."
           tofu plan -out=tfplan
+          PLAN_EXIT_CODE=$?
 
-          # Опционально: логируем, что изменения есть, но не ломаем job
-          if [ $? -eq 2 ]; then
-            echo "::notice::Plan has changes (exit code 2). Review the plan before applying."
-          elif [ $? -ne 0 ]; then
-            echo "::error::Plan failed with unexpected error."
+          if [ "$PLAN_EXIT_CODE" -eq 0 ]; then
+            echo "::notice::No changes detected (exit code 0)."
+          elif [ "$PLAN_EXIT_CODE" -eq 2 ]; then
+            echo "::notice::Plan has changes (exit code 2). Review before applying."
+            # Здесь НЕ делаем exit 1 — мы хотим, чтобы job продолжил работу, если дальше будет apply
+          else
+            echo "::error::Plan failed with unexpected error (exit code $PLAN_EXIT_CODE)."
             exit 1
           fi
 
