@@ -1,16 +1,16 @@
 name: opentofu-apply
+
 on:
   workflow_dispatch:
+    branches:
+      - main
 
 concurrency:
   group: opentofu
   cancel-in-progress: false
-defaults:
-  run:
-    working-directory: ./opentofu/docker-lab
+
 jobs:
   tofu-apply:
-    name: plan-check
     runs-on: self-hosted
     timeout-minutes: 10
     env:
@@ -22,23 +22,23 @@ jobs:
         run: |
           if [ "$GITHUB_REF_NAME" != "main" ]; then
             echo "Ошибка: разрешено запускать только из ветки main."
-            echo "Текущая (выбранная) ветка: ${{ github.ref_name }}"
             exit 1
           fi
 
       - name: Check out source
         uses: actions/checkout@v6
-      - name: Check all config and format
+
+      - name: Init and validate
+        working-directory: ./opentofu/docker-lab
         run: |
           tofu --version
           tofu init
-          tofu state list
-          tofu plan -detailed-exitcode
           tofu fmt -check -recursive
           tofu validate
 
       - name: Build Plan
         id: plan
+        working-directory: ./opentofu/docker-lab
         run: |
           tofu plan -out=tfplan -detailed-exitcode
           PLAN_EXIT=$?
@@ -54,8 +54,10 @@ jobs:
 
       - name: Apply Saved Plan
         if: steps.plan.outputs.plan_exit == '2'
+        working-directory: ./opentofu/docker-lab
         run: tofu apply -auto-approve tfplan
 
       - name: Cleanup Plan File
         if: always()
+        working-directory: ./opentofu/docker-lab
         run: rm -f tfplan
