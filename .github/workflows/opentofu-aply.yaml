@@ -1,3 +1,4 @@
+
 name: opentofu-apply
 
 on:
@@ -40,9 +41,13 @@ jobs:
         id: plan
         working-directory: ./opentofu/docker-lab
         run: |
+          set +e
           tofu plan -out=tfplan -detailed-exitcode
           PLAN_EXIT=$?
+          set -e
+          
           echo "plan_exit=$PLAN_EXIT" >> $GITHUB_OUTPUT
+          
           if [ "$PLAN_EXIT" -eq 0 ]; then
             echo "Нет изменений (exit 0)."
           elif [ "$PLAN_EXIT" -eq 2 ]; then
