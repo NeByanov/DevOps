@@ -19,6 +19,10 @@ jobs:
       run:
         shell: bash
         working-directory: ./opentofu/docker-lab/
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
     steps:
       - name: Check branch is main
         run: |
@@ -31,9 +35,6 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
       - name: Check all config and format
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           tofu --version
           tofu init
