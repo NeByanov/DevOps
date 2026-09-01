@@ -76,8 +76,8 @@ jobs:
         working-directory: ./opentofu/docker-lab
         run: |
           echo "=== State list после apply ==="
-          tofu state list
-
+          StateCode=$(tofu state list)
+          echo "$StateCode"
       - name: HTTP endpoint check
         if: steps.plan.outputs.plan_exit == '2'
         working-directory: ./opentofu/docker-lab
@@ -87,6 +87,7 @@ jobs:
           echo "HTTP status: $CODE"
           if [ "$CODE" != "200" ]; then
             echo "::warning::Эндпоинт вернул $CODE, ожидался 200."
+            exit 1
           fi
 
       - name: Cleanup plan file
