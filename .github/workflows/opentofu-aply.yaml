@@ -79,9 +79,9 @@ jobs:
           set -e
           StateCode=$(tofu state list)
 
-          grep -qF "docker_container.tofu_lab_web" <<< "$OUTPUT"
-          grep -qF "docker_image.nginx" <<< "$OUTPUT"
-          grep -qF "docker_network.tofu_lab" <<< "$OUTPUT"
+          grep -qF "docker_container.tofu_lab_web" <<< "$StateCode"
+          grep -qF "docker_image.nginx" <<< "$StateCode"
+          grep -qF "docker_network.tofu_lab" <<< "$StateCode"
           echo "Все ресурсы на месте"
       - name: HTTP endpoint check
         if: steps.plan.outputs.plan_exit == '2'
