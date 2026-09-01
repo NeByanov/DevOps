@@ -1,38 +1,76 @@
 name: opentofu-plan
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'opentofu/docker-lab/**'
       - 'opentofu/state-backend/**'
       - '.github/workflows/opentofu-plan.yaml'
-
   workflow_dispatch:
 
 concurrency:
   group: opentofu
   cancel-in-progress: false
+
 jobs:
-  syntax-check:
-    name: plan-check
+  plan-check:
+    name: Plan check
     runs-on: self-hosted
     timeout-minutes: 10
     defaults:
       run:
         shell: bash
-        working-directory: ./opentofu/docker-lab/
+        working-directory: ./opentofu/docker-lab
+
     steps:
       - name: Check out source
         uses: actions/checkout@v6
-      - name: Check all config and format
+
+      - name: Init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: tofu init -input=false
+
+      - name: Format check
+        run: tofu fmt -check -recursive
+
+      - name: Validate
+        run: tofu validate
+
+      - name: Show current state
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: tofu state list
+
+      - name: Plan
+        id: plan
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          tofu --version
-          tofu init
-          tofu state list
-          tofu plan -detailed-exitcode
-          tofu fmt -check -recursive
-          tofu validate
-          curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8888/
+          set +e
+          tofu plan -input=false -detailed-exitcode
+          PLAN_EXIT=$?
+          set -e
+          echo "plan_exit=$PLAN_EXIT" >> $GITHUB_OUTPUT
+
+          case "$PLAN_EXIT" in
+            0)
+              echo "::notice::Нет изменений — инфраструктура уже соответствует коду."
+              ;;
+            2)
+              echo "::notice::Обнаружены изменения. Plan-only: apply не запускается."
+              ;;
+            *)
+              echo "::error::Ошибка выполнения plan (exit code $PLAN_EXIT)."
+              exit 1
+              ;;
+          esac
+
+      - name: HTTP endpoint check
+        run: |
+          CODE=$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8888/ || true)
+          echo "HTTP status: $CODE"

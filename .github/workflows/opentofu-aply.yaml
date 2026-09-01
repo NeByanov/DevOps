@@ -1,10 +1,7 @@
-
 name: opentofu-apply
 
 on:
   workflow_dispatch:
-    branches:
-      - main
 
 concurrency:
   group: opentofu
@@ -12,6 +9,7 @@ concurrency:
 
 jobs:
   tofu-apply:
+    name: Apply
     runs-on: self-hosted
     timeout-minutes: 10
     env:
@@ -22,47 +20,76 @@ jobs:
       - name: Check branch is main
         run: |
           if [ "$GITHUB_REF_NAME" != "main" ]; then
-            echo "Ошибка: разрешено запускать только из ветки main."
+            echo "::error::Разрешено запускать только из ветки main."
             exit 1
           fi
 
       - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Init and validate
+      - name: Init
         working-directory: ./opentofu/docker-lab
-        run: |
-          tofu --version
-          tofu init
-          tofu fmt -check -recursive
-          tofu validate
+        run: tofu init -input=false
 
-      - name: Build Plan
+      - name: Format check
+        working-directory: ./opentofu/docker-lab
+        run: tofu fmt -check -recursive
+
+      - name: Validate
+        working-directory: ./opentofu/docker-lab
+        run: tofu validate
+
+      - name: Build plan
         id: plan
         working-directory: ./opentofu/docker-lab
         run: |
           set +e
-          tofu plan -out=tfplan -detailed-exitcode
+          tofu plan -out=tfplan -input=false -detailed-exitcode
           PLAN_EXIT=$?
           set -e
-          
           echo "plan_exit=$PLAN_EXIT" >> $GITHUB_OUTPUT
-          
-          if [ "$PLAN_EXIT" -eq 0 ]; then
-            echo "Нет изменений (exit 0)."
-          elif [ "$PLAN_EXIT" -eq 2 ]; then
-            echo "Есть изменения (exit 2). План сохранён в tfplan."
-          else
-            echo "Ошибка plan (exit $PLAN_EXIT)."
-            exit 1
-          fi
 
-      - name: Apply Saved Plan
+          case "$PLAN_EXIT" in
+            0)
+              echo "::notice::Нет изменений — apply не требуется."
+              ;;
+            2)
+              echo "::notice::Обнаружены изменения. План сохранён в tfplan, переходим к apply."
+              ;;
+            *)
+              echo "::error::Ошибка plan (exit code $PLAN_EXIT)."
+              exit 1
+              ;;
+          esac
+
+      - name: Apply saved plan
         if: steps.plan.outputs.plan_exit == '2'
         working-directory: ./opentofu/docker-lab
-        run: tofu apply -auto-approve tfplan
+        run: tofu apply -input=false -auto-approve tfplan
 
-      - name: Cleanup Plan File
+      - name: Skip apply (no changes)
+        if: steps.plan.outputs.plan_exit == '0'
+        run: echo "::notice::Шаг apply пропущен — изменений нет."
+
+      - name: Check state after apply
+        if: steps.plan.outputs.plan_exit == '2'
+        working-directory: ./opentofu/docker-lab
+        run: |
+          echo "=== State list после apply ==="
+          tofu state list
+
+      - name: HTTP endpoint check
+        if: steps.plan.outputs.plan_exit == '2'
+        working-directory: ./opentofu/docker-lab
+        run: |
+          echo "=== Проверка HTTP-эндпоинта ==="
+          CODE=$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8888/ || true)
+          echo "HTTP status: $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "::warning::Эндпоинт вернул $CODE, ожидался 200."
+          fi
+
+      - name: Cleanup plan file
         if: always()
         working-directory: ./opentofu/docker-lab
         run: rm -f tfplan
