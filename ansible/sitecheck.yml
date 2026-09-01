@@ -1,0 +1,5 @@
+- name: Apply sitecheck role
+  hosts: all
+  become: true
+  roles:
+    - sitecheck

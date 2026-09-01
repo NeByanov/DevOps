@@ -1,3 +1,4 @@
+#logrotate
 - name: Install required packages
   ansible.builtin.apt:
     name: logrotate

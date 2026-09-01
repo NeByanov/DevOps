@@ -1,0 +1,11 @@
+[Unit]
+Description=Run sitecheck every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnCalendar=*:0/5
+Persistent=true
+Unit=sitecheck.service
+
+[Install]
+WantedBy=timers.target

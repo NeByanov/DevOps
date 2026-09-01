@@ -1,0 +1,18 @@
+[Unit]
+Description=SiteCheck — HTTP 200 probe for 127.0.0.1:8888
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sitecheck
+ExecStart=/usr/local/bin/sitecheck
+TimeoutStartSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=timers.target

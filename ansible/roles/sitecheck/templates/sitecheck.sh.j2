@@ -1,0 +1,17 @@
+#!/bin/bash
+set -uo pipefail
+
+URL="http://127.0.0.1:8888/"
+
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL") || {
+    echo "FAIL: could not connect to ${URL}"
+    exit 1
+}
+
+if [ "$STATUS" = "200" ]; then
+    echo "OK: ${URL} returned HTTP 200"
+    exit 0
+else
+    echo "FAIL: ${URL} returned HTTP ${STATUS}"
+    exit 1
+fi
