@@ -76,8 +76,13 @@ jobs:
         working-directory: ./opentofu/docker-lab
         run: |
           echo "=== State list после apply ==="
+          set -e
           StateCode=$(tofu state list)
-          echo "$StateCode"
+
+          grep -qF "docker_container.tofu_lab_web" <<< "$OUTPUT"
+          grep -qF "docker_image.nginx" <<< "$OUTPUT"
+          grep -qF "docker_network.tofu_lab" <<< "$OUTPUT"
+          echo "Все ресурсы на месте"
       - name: HTTP endpoint check
         if: steps.plan.outputs.plan_exit == '2'
         working-directory: ./opentofu/docker-lab
