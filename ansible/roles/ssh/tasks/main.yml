@@ -1,13 +1,45 @@
-
 ---
-- name: Ensure backup directory exists
-  file:
-    path: /etc/ssh/backups
+- name: Ensure drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
     state: directory
-    mode: '0700'
+    mode: '0755'
+  tags:
+    - ssh
+    - security
 
-- name: Check current SSH config syntax before any changes
-  command: sshd -t
+- name: Create SSH drop-in config for security hardening
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/99-security-hardening.conf
+    content: |
+      Port 22
+      PermitRootLogin no
+      PubkeyAuthentication yes
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+    mode: '0644'
+    owner: root
+    group: root
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: reload ssh
+  tags:
+    - ssh
+    - security
+
+- name: Remove legacy hardening directives from main SSH config
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^(PermitRootLogin|PasswordAuthentication)\s+no$'
+    state: absent
+    backup: true
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: reload ssh
+  tags:
+    - ssh
+    - security
+
+- name: Check SSH config syntax after changes
+  ansible.builtin.command: /usr/sbin/sshd -t
   register: sshd_check_config
   changed_when: false
   failed_when: sshd_check_config.rc != 0
@@ -15,64 +47,69 @@
     - ssh
     - security
 
-- name: Disable root login
-  lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^PermitRootLogin'
-    line: 'PermitRootLogin no'
-    backup: yes
-  notify: reload sshd
+- name: Apply validated SSH configuration before firewall changes
+  ansible.builtin.meta: flush_handlers
   tags:
     - ssh
-
-- name: Disable password authentication
-  lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^PasswordAuthentication'
-    line: 'PasswordAuthentication no'
-    backup: yes
-  notify: reload sshd
-  tags:
-    - ssh
-
-- name: Disable keyboard-interactive auth
-  lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^KbdInteractiveAuthentication'
-    line: 'KbdInteractiveAuthentication no'
-    backup: yes
-  notify: reload sshd
-  tags:
-    - ssh
+    - security
 
 - name: Ensure ufw is installed
-  apt:
+  ansible.builtin.apt:
     name: ufw
     state: present
-    update_cache: yes
-  become: true
+    update_cache: true
   tags:
     - ufw
     - security
 
-- name: Set UFW default policies
-  ufw:
+- name: Remove unrestricted legacy Nginx HTTP rule
+  community.general.ufw:
+    rule: allow
+    name: Nginx HTTP
+    delete: true
+  tags:
+    - ufw
+    - security
+
+- name: Set UFW default incoming policy to deny
+  community.general.ufw:
     default: deny
     direction: incoming
+  tags:
+    - ufw
+    - security
 
 - name: Set UFW default outgoing policy to allow
-  ufw:
+  community.general.ufw:
     default: allow
     direction: outgoing
+  tags:
+    - ufw
+    - security
 
-- name: Allow SSH from VirtualBox subnet
-  ufw:
+- name: Allow SSH from VirtualBox subnet only
+  community.general.ufw:
     rule: allow
     from_ip: 192.168.56.0/24
     port: 22
     proto: tcp
     comment: "SSH from VirtualBox"
+  tags:
+    - ufw
+    - security
 
 - name: Enable UFW
-  ufw:
+  community.general.ufw:
     state: enabled
+  tags:
+    - ufw
+    - security
+
+- name: Verify UFW is active
+  ansible.builtin.command: ufw status
+  register: ufw_status
+  changed_when: false
+  failed_when: "'Status: active' not in ufw_status.stdout"
+  tags:
+    - ufw
+    - security

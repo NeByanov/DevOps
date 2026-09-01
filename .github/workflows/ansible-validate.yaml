@@ -29,11 +29,16 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Install Ansible
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned Ansible and collections
         shell: bash
         run: |
-          sudo apt update
-          sudo apt install -y ansible
+          python -m pip install "ansible-core==2.21.3"
+          ansible-galaxy collection install -r requirements.yml
 
       - name: Syntax-Check
         run: |
@@ -42,6 +47,7 @@ jobs:
           ansible-playbook --syntax-check verify.yml -i inventory.yml
           ansible-playbook --syntax-check site-backup.yml -i inventory.yml
           ansible-playbook --syntax-check verify-logrotate.yml -i inventory.yml
+          ansible-playbook --syntax-check sitessh.yml -i inventory.yml
 
   deploy:
     name: Deploy
