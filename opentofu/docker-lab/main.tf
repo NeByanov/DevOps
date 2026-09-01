@@ -44,6 +44,6 @@ resource "docker_container" "tofu_lab_web" {
   # ВОТ НОВАЯ МЕТКА — для проверки
   labels {
     label = "lab-label"
-    value = "check-plan-apply"
+    value = "Test-Check-tamp"
   }
 }
