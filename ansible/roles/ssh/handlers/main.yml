@@ -1,0 +1,5 @@
+- name: reload sshd
+  systemd:
+    name: ssh
+    daemon_reload: yes
+    state: reloaded

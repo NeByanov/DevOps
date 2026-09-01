@@ -1,0 +1,78 @@
+
+---
+- name: Ensure backup directory exists
+  file:
+    path: /etc/ssh/backups
+    state: directory
+    mode: '0700'
+
+- name: Check current SSH config syntax before any changes
+  command: sshd -t
+  register: sshd_check_config
+  changed_when: false
+  failed_when: sshd_check_config.rc != 0
+  tags:
+    - ssh
+    - security
+
+- name: Disable root login
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PermitRootLogin'
+    line: 'PermitRootLogin no'
+    backup: yes
+  notify: reload sshd
+  tags:
+    - ssh
+
+- name: Disable password authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+    backup: yes
+  notify: reload sshd
+  tags:
+    - ssh
+
+- name: Disable keyboard-interactive auth
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^KbdInteractiveAuthentication'
+    line: 'KbdInteractiveAuthentication no'
+    backup: yes
+  notify: reload sshd
+  tags:
+    - ssh
+
+- name: Ensure ufw is installed
+  apt:
+    name: ufw
+    state: present
+    update_cache: yes
+  become: true
+  tags:
+    - ufw
+    - security
+
+- name: Set UFW default policies
+  ufw:
+    default: deny
+    direction: incoming
+
+- name: Set UFW default outgoing policy to allow
+  ufw:
+    default: allow
+    direction: outgoing
+
+- name: Allow SSH from VirtualBox subnet
+  ufw:
+    rule: allow
+    from_ip: 192.168.56.0/24
+    port: 22
+    proto: tcp
+    comment: "SSH from VirtualBox"
+
+- name: Enable UFW
+  ufw:
+    state: enabled
