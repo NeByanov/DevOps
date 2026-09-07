@@ -1,0 +1,51 @@
+- hosts: windows_hosts
+  become: false
+  gather_facts: false
+
+  tasks:
+
+  - name: Get info for all installed services
+    ansible.windows.win_service_info:
+    register: all_services_info
+
+  - name: Show all services info
+    ansible.builtin.debug:
+      var: all_services_info
+
+  - name: Get info for a single service
+    ansible.windows.win_service_info:
+      name: WinRM
+    register: winrm_info
+
+  - name: Show WinRM service info
+    ansible.builtin.debug:
+      var: winrm_info
+
+  - name: Get info for a service using its display name
+    ansible.windows.win_service_info:
+      name: Windows Remote Management (WS-Management)
+    register: winrm_display_info
+
+  - name: Show service info by display name
+    ansible.builtin.debug:
+      var: winrm_display_info
+
+  - name: Find all services that start with 'win'
+    ansible.windows.win_service_info:
+      name: win*
+    register: win_services_info
+
+  - name: Show services starting with 'win'
+    ansible.builtin.debug:
+      var: win_services_info
+
+  - name: Start WinRM
+    ansible.windows.win_service:
+      name: WinRM
+      state: started
+      start_mode: auto
+    register: winrm_start_result
+
+  - name: Show WinRM start result
+    ansible.builtin.debug:
+      var: winrm_start_result
