@@ -1,0 +1,36 @@
+name: windows-service
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: ./ansible
+
+jobs:
+  windows-service:
+    name: syntax-check
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+     - name: Write vault password file
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > /tmp/vault_pass.txt
+
+      - name: Start windows-service.yml
+        run: |
+          ansible-playbook windows-service.yml \
+          -i inventory.yml \
+          --vault-password-file /tmp/vault_pass.txt \
+          -e "env=production"
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+          ANSIBLE_STDOUT_CALLBACK: /dev/null
+      - name: Cleanup secrets
+        if: always()
+        run: |
+          rm -f /tmp/vault_pass.txt
