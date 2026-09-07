@@ -24,9 +24,12 @@ jobs:
       env:
         VAULT_PASSWORD: ${{ secrets.VAULT_PASSWORD }}
       run: |
-        tmp_file=$(mktemp --tmpdir --mode=600 vault_pass_XXXXXX)
+
+        tmp_file=$(mktemp --tmpdir vault_pass_XXXXXX)
         echo "$VAULT_PASSWORD" > "$tmp_file"
+        chmod 600 "$tmp_file"          # <-- вот так ставим строгие права
         trap "rm -f '$tmp_file'" EXIT
+
         /home/vboxuser/.local/bin/ansible-playbook \
           -i inventory.yml \
           sitecheck.yml \
