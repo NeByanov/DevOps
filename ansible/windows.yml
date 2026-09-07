@@ -75,8 +75,8 @@
         direction: in
         action: allow
         protocol: tcp
-        local_port: "{{ bind_port }}"
-        remote_addresses: "{{ allowed_subnet }}"
+        localport: "{{ bind_port }}"
+        remoteip: "{{ allowed_subnet }}"
 
     # ── 6. Проверка Default Web Site (без управления) ────────────
     - name: Assert Default Web Site is stopped
