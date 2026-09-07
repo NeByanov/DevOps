@@ -22,19 +22,11 @@ jobs:
     - name: Write vault password file
       run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > /tmp/vault_pass.txt
 
-    - name: Validate Ansible environment (path + version + python)
+    - name: Confirm pipx Ansible is used
       run: |
-        echo "=== PATH ==="
-        echo "$PATH"
-        echo
-        echo "=== which ansible-playbook ==="
-        which ansible-playbook || echo "NOT FOUND"
-        echo
-        echo "=== ansible --version ==="
-        ansible --version || echo "ANSIBLE FAILED"
-        echo
-        echo "=== which python ==="
-        which python
+        echo "PATH=$PATH"
+        which ansible-playbook || echo "ansible-playbook not found via PATH"
+        /home/vboxuser/.local/bin/ansible-playbook --version
 
     - name: Start windows-service.yml
       run: |
