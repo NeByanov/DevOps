@@ -36,7 +36,3 @@ jobs:
           --check \
           --vault-password-file="$tmp_file"
 
-    - name: Cleanup secrets
-      if: always()
-      run: |
-        rm -f /tmp/vault_pass.txt
