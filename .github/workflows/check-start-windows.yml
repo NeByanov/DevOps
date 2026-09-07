@@ -32,7 +32,6 @@ jobs:
       run: |
         /home/vboxuser/.local/bin/ansible-playbook windows-service.yml \
         -i inventory.yml \
-        --vault-password-file /tmp/vault_pass.txt \
         --check
     - name: Cleanup secrets
       if: always()
