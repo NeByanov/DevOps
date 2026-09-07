@@ -1,10 +1,23 @@
+---
 all:
   children:
     lab_vm:
       hosts:
         lab_vm1:
           ansible_host: 127.0.0.1
+      vars:
+        ansible_user: vboxuser
+        ansible_ssh_private_key_file: /home/vboxuser/.ssh/id_ed25519foransible
 
-  vars:
-    ansible_user: vboxuser
-    ansible_ssh_private_key_file: /home/vboxuser/.ssh/id_ed25519foransible
+    windows_hosts:
+      hosts:
+        win-devops-01:
+          ansible_host: 192.168.56.103
+      vars:
+        ansible_user: ".\\winops"
+        ansible_connection: winrm
+        ansible_winrm_transport: ntlm
+        ansible_port: 5985
+        ansible_winrm_operation_timeout_sec: 60
+        ansible_winrm_read_timeout_sec: 70
+        ansible_winrm_server_cert_validation: ignore
