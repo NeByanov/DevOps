@@ -32,14 +32,10 @@ jobs:
 
         /home/vboxuser/.local/bin/ansible-playbook \
           -i inventory.yml \
-          sitecheck.yml \
+          windows-service.yml \
           --vault-password-file="$tmp_file"
+          --check
 
-    - name: Start windows-service.yml
-      run: |
-        /home/vboxuser/.local/bin/ansible-playbook windows-service.yml \
-        -i inventory.yml \
-        --check
     - name: Cleanup secrets
       if: always()
       run: |
