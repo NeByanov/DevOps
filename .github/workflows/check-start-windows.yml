@@ -11,7 +11,7 @@ defaults:
 
 jobs:
   windows-service:
-    name: syntax-check
+    name: windows-service
     runs-on: self-hosted
     timeout-minutes: 10
 
@@ -19,14 +19,18 @@ jobs:
     - name: Check out source
       uses: actions/checkout@v6
 
-    - name: Write vault password file
-      run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > /tmp/vault_pass.txt
 
-    - name: Confirm pipx Ansible is used
+    - name: Run with temp vault file (secure)
+      env:
+        VAULT_PASSWORD: ${{ secrets.VAULT_PASSWORD }}
       run: |
-        echo "PATH=$PATH"
-        which ansible-playbook || echo "ansible-playbook not found via PATH"
-        /home/vboxuser/.local/bin/ansible-playbook --version
+        tmp_file=$(mktemp --tmpdir --mode=600 vault_pass_XXXXXX)
+        echo "$VAULT_PASSWORD" > "$tmp_file"
+        trap "rm -f '$tmp_file'" EXIT
+        /home/vboxuser/.local/bin/ansible-playbook \
+          -i inventory.yml \
+          sitecheck.yml \
+          --vault-password-file="$tmp_file"
 
     - name: Start windows-service.yml
       run: |
