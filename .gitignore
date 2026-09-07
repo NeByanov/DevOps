@@ -22,6 +22,7 @@ kubeconfig*
 *.plan
 .aws/
 *.license
+vault_pass.txt
 # Backup state files (часто появляются при apply)
 *.backup
 
