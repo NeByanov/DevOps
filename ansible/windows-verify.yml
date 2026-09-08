@@ -36,9 +36,9 @@
         success_msg: "SUCCESS:WinRM имеет автозапуск"
         quiet: true
 
-    - name: Check HTTP CODE (200) 192.168.56.101:8081
+    - name: Check HTTP CODE (200) 192.168.56.103:8081
       ansible.builtin.uri:
-        url: "http://192.168.56.101:8081/"
+        url: "http://192.168.56.103:8081/"
         method: GET
         timeout: 10
         status_code: 200
@@ -54,6 +54,6 @@
           - uri_check.status | default(0) == 200
         fail_msg: |
           Сервис недоступен или вернул неверный статус:
-            - URL: http://192.168.56.101:8081/
+            - URL: http://192.168.56.103:8081/
             - Статус: {{ uri_check.status | default('N/A') }}
             - Ошибка: {{ uri_check.msg | default('Нет сообщения об ошибке') }}
