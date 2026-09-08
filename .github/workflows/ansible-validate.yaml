@@ -57,6 +57,7 @@ jobs:
           ansible-playbook --syntax-check site-backup.yml -i inventory.yml
           ansible-playbook --syntax-check verify-logrotate.yml -i inventory.yml
           ansible-playbook --syntax-check sitessh.yml -i inventory.yml
+          ansible-playbook --syntax-check windows-identity.yml -i inventory.yml
 
   deploy:
     name: Deploy

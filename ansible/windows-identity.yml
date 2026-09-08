@@ -1,0 +1,60 @@
+
+---
+- name: Create 1C service account and directories
+  hosts: win-devops-01
+  gather_facts: false
+
+  tasks:
+    - name: Create and enable local user svc_1c_lab
+      ansible.windows.win_user:
+        name: "{{ one_c_user }}"
+        password: "{{ ansible_winrm_password_1c_user }}"
+        state: present
+        account_disabled: false
+        password_never_expires: true
+        user_cannot_change_password: true
+      no_log: true
+
+
+    - name: Resolve Administrators group name from SID
+      ansible.windows.win_shell: |
+        (Get-WmiObject Win32_Group -Filter "SID='S-1-5-32-544'").Name
+      register: admin_group_name
+      changed_when: false
+
+    - name: Ensure svc_1c_lab is NOT in Administrators
+      ansible.windows.win_group_membership:
+        name: "{{ admin_group_name.stdout | trim }}"
+        members: "{{ one_c_user }}"
+        state: absent
+
+    - name: Grant SeServiceLogonRight to svc_1c_lab
+      ansible.windows.win_user_right:
+        name: SeServiceLogonRight
+        users: "{{ one_c_user }}"
+        action: add
+
+    - name: Create root directory
+      ansible.windows.win_file:
+        path: "{{ one_c_path }}"
+        state: directory
+
+    - name: Create data directory
+      ansible.windows.win_file:
+        path: "{{ one_c_data_dir }}"
+        state: directory
+
+    - name: Create logs directory
+      ansible.windows.win_file:
+        path: "{{ one_c_logs_dir }}"
+        state: directory
+
+    - name: Grant Modify on root directory and all contents
+      ansible.windows.win_acl:
+        path: "{{ one_c_path }}"
+        user: "{{ one_c_user }}"
+        rights: Modify
+        type: allow
+        state: present
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None

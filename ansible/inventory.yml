@@ -28,3 +28,7 @@ all:
         iis_port: 8081
         iis_allowed_subnet: 192.168.56.0/24
         iis_url: "http://{{ iis_bind_ip }}:{{ iis_port }}/"
+        one_c_user: svc_1c_lab
+        one_c_path: C:\1C-lab
+        one_c_data_dir: C:\1C-lab\data
+        one_c_logs_dir: C:\1C-lab\logs
