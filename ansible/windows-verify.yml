@@ -15,7 +15,7 @@
     - name: Проверить наличие WinRM на хосте
       ansible.builtin.assert:
         that:
-          - winrm_info.exists
+          - winrm_services_info.exists
         fail_msg: "ERROR: WinRM нет на хосте"
         success_msg: "SUCCESS: Служба WinRM присутствует"
         quiet: true
