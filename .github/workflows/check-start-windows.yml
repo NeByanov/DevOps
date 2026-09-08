@@ -4,7 +4,7 @@ on:
     branches: [ main ]
     paths:
       - 'ansible/**'
-
+      - '.github/workflows/check-start-windows.yaml'
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Check ansible version
-      run: ansible --version
+      run: /home/vboxuser/.local/bin/ansible --version
 
     - name: Run with temp vault file (secure)
       env:
