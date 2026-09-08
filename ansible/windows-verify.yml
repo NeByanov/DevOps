@@ -12,10 +12,18 @@
         name: winRM
       register: win_services_info
 
+    - name: Проверить наличие WinRM на хосте
+      ansible.builtin.assert:
+        that:
+          - winrm_info.exists
+        fail_msg: "ERROR: WinRM нет на хосте"
+        success_msg: "SUCCESS: Служба WinRM присутствует"
+        quiet: true
+
     - name: Check running WinRM
       ansible.builtin.assert:
         that:
-          - win_services_info[0].state == "running"
+          - win_services_info.state == "running"
         fail_msg: "ERROR:Служба не запущена, текущее состояние {{ win_services_info[0].state }}"
         success_msg: "SUCCESS:Служба WinRM запущена"
         quiet: true
@@ -23,7 +31,7 @@
     - name: Check autorunning WinRM on host
       ansible.builtin.assert:
         that:
-          - win_services_info[0].start_mode == "auto"
+          - win_services_info.start_mode == "auto"
         fail_msg: "ERROR:Служба не запущена, текущее состояние {{ win_services_info[0].start_mode }}"
         success_msg: "SUCCESS:WinRM имеет автозапуск"
         quiet: true
