@@ -45,7 +45,7 @@
       delegate_to: localhost
       register: uri_check
       ignore_errors: true
-      when: not ansible_check_mode
+      check_mode: false
 
     - name: Validate http check
       ansible.builtin.assert:

@@ -4,7 +4,7 @@ on:
     branches: [ main ]
     paths:
       - 'ansible/**'
-      - '.github/workflows/check-start-windows.yaml'
+      - '.github/workflows/check-start-windows.yml'
   workflow_dispatch:
 
 permissions:
