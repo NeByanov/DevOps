@@ -50,7 +50,7 @@
     - name: Validate http check
       ansible.builtin.assert:
         that:
-          - ansible_check_mode or (uri_check.status | default(0) == 200)
+          - uri_check.status | default(0) == 200
         fail_msg: |
           Сервис недоступен или вернул неверный статус:
             - URL: http://192.168.56.103:8081/
