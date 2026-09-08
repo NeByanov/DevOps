@@ -38,7 +38,7 @@
 
     - name: Check HTTP CODE (200) 192.168.56.103:8081
       ansible.builtin.uri:
-        url: iis_url
+        url: "{{ iis_url }}"
         method: GET
         timeout: 10
         status_code: 200
@@ -53,7 +53,7 @@
           - uri_check.status | default(0) == 200
         fail_msg: |
           Сервис недоступен или вернул неверный статус:
-            - URL: iis_url
+            - URL: "{{ iis_url }}"
             - Статус: {{ uri_check.status | default('N/A') }}
             - Ошибка: {{ uri_check.msg | default('Нет сообщения об ошибке') }}
       check_mode: false
