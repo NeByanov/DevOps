@@ -1,5 +1,10 @@
 name: windows-service
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ansible/**'
+
   workflow_dispatch:
 
 permissions:
@@ -19,6 +24,8 @@ jobs:
     - name: Check out source
       uses: actions/checkout@v6
 
+    - name: Check ansible version
+      run: ansible --version
 
     - name: Run with temp vault file (secure)
       env:
@@ -32,7 +39,7 @@ jobs:
 
         /home/vboxuser/.local/bin/ansible-playbook \
           -i inventory.yml \
-          windows-service.yml \
+          windows-verify.yml \
           --check \
           --vault-password-file="$tmp_file"
 
