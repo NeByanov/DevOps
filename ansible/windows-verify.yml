@@ -51,7 +51,7 @@
         that:
           - uri_check is defined
           - uri_check is success
-          - uri_check.status == 200
+          - uri_check.service[0].status == 200
         fail_msg: |
           Сервис недоступен или вернул неверный статус:
             - URL: http://192.168.56.101:8081/
