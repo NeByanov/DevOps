@@ -21,3 +21,10 @@ all:
         ansible_winrm_operation_timeout_sec: 60
         ansible_winrm_read_timeout_sec: 70
         ansible_winrm_server_cert_validation: ignore
+        iis_site_name: ansible-lab
+        iis_path: C:\Sites\ansible-lab
+        iis_pool: ansible-lab-pool
+        iis_bind_ip: 192.168.56.103
+        iis_port: 8081
+        iis_allowed_subnet: 192.168.56.0/24
+

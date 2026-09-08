@@ -3,20 +3,12 @@
   gather_facts: false
   become: false
 
-  vars:
-    site_name: ansible-lab
-    site_path: C:\Sites\ansible-lab
-    app_pool: ansible-lab-pool
-    bind_ip: 192.168.56.103
-    bind_port: 8081
-    allowed_subnet: 192.168.56.0/24
-
   tasks:
 
     # ── 1. Папка сайта ──────────────────────────────────────────
     - name: Create site directory
       ansible.windows.win_file:
-        path: "{{ site_path }}"
+        path: "{{ iis_path }}"
         state: directory
 
     # ── 2. Application Pool ──────────────────────────────────────
@@ -26,7 +18,7 @@
     # Требует PowerShell-модуль IISAdministration на целевом хосте.
     - name: Create application pool (ApplicationPoolIdentity, no .NET)
       microsoft.iis.web_app_pool:
-        name: "{{ app_pool }}"
+        name: "{{ iis_pool }}"
         state: started
         attributes:
           processModel.identityType: ApplicationPoolIdentity
@@ -35,7 +27,7 @@
     # ── 3. HTML с маркером ───────────────────────────────────────
     - name: Deploy index.html with managed-by-ansible marker
       ansible.windows.win_copy:
-        dest: "{{ site_path }}\\index.html"
+        dest: "{{ iis_path }}\\index.html"
         content: |
           <!DOCTYPE html>
           <html lang="ru">
@@ -55,28 +47,28 @@
     # указания списка привязок. Формат: список словарей с ip/port/protocol.
     - name: Create and start IIS site
       microsoft.iis.website:
-        name: "{{ site_name }}"
+        name: "{{ iis_site_name }}"
         state: started
-        physical_path: "{{ site_path }}"
-        application_pool: "{{ app_pool }}"
+        physical_path: "{{ iis_path }}"
+        application_pool: "{{ iis_pool }}"
         bindings:
           set:
-            - ip: "{{ bind_ip }}"
-              port: "{{ bind_port }}"
+            - ip: "{{ iis_bind_ip }}"
+              port: "{{ iis_port }}"
               protocol: http
 
     # ── 5. Firewall: TCP 8081 только из 192.168.56.0/24 ──────────
     # win_firewall_rule не deprecated — остаётся в community.windows.
     - name: Allow inbound TCP 8081 from lab subnet only
       community.windows.win_firewall_rule:
-        name: Allow ansible-lab HTTP {{ bind_port }}
+        name: Allow ansible-lab HTTP {{ iis_port }}
         enabled: true
         state: present
         direction: in
         action: allow
         protocol: tcp
-        localport: "{{ bind_port }}"
-        remoteip: "{{ allowed_subnet }}"
+        localport: "{{ iis_port }}"
+        remoteip: "{{ iis_allowed_subnet }}"
 
     # ── 6. Проверка Default Web Site (без управления) ────────────
     - name: Assert Default Web Site is stopped
