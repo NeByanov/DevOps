@@ -23,7 +23,7 @@
     - name: Check running WinRM
       ansible.builtin.assert:
         that:
-          - win_services_info.services[0].state == "running"
+          - win_services_info.services[0].state == "started"
         fail_msg: "ERROR:Служба не запущена, текущее состояние {{ win_services_info.services[0].state }}"
         success_msg: "SUCCESS:Служба WinRM запущена"
         quiet: true
