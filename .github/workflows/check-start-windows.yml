@@ -34,7 +34,7 @@ jobs:
 
         tmp_file=$(mktemp --tmpdir vault_pass_XXXXXX)
         echo "$VAULT_PASSWORD" > "$tmp_file"
-        chmod 600 "$tmp_file"          # <-- вот так ставим строгие права
+        chmod 600 "$tmp_file"
         trap "rm -f '$tmp_file'" EXIT
 
         /home/vboxuser/.local/bin/ansible-playbook \

@@ -1,9 +1,12 @@
 ---
 - name: Windows verification
-  hosts: windows
+  hosts: windows_hosts
   gather_facts: false
 
   tasks:
+    - name: WinRM connectivity
+      ansible.windows.win_ping:
+
     - name: Find all services that start with 'win'
       ansible.windows.win_service_info:
         name: win*
