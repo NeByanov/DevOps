@@ -41,9 +41,11 @@ jobs:
           ansible-galaxy collection install -r requirements.yml
 
       - name: Syntax-Check
+        env:
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
           tmp_file=$(mktemp --tmpdir vault_pass_XXXXXX)
-          echo "{{ secrets.ANSIBLE_VAULT_PASSWORD }}" > "$tmp_file"
+          echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
           chmod 600 "$tmp_file"
           trap "rm -f '$tmp_file'" EXIT
 
@@ -70,7 +72,15 @@ jobs:
       - name: Run Ansible playbook
         env:
           PATH: /home/vboxuser/.local/bin:/usr/local/bin:/usr/bin:/bin
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
+          tmp_file=$(mktemp --tmpdir vault_pass_XXXXXX)
+          echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
+          chmod 600 "$tmp_file"
+          trap 'rm -f "$tmp_file"' EXIT
+
+          export ANSIBLE_VAULT_PASSWORD_FILE="$tmp_file"
+
           ansible-playbook --version
           ansible-playbook verify.yml -i inventory.yml
           ansible-playbook verify-logrotate.yml -i inventory.yml
