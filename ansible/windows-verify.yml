@@ -45,15 +45,15 @@
       delegate_to: localhost
       register: uri_check
       ignore_errors: true
+      when: not ansible_check_mode
 
     - name: Validate http check
       ansible.builtin.assert:
         that:
-          - uri_check is defined
-          - uri_check is success
-          - uri_check.status | default(0) == 200
+          - ansible_check_mode or (uri_check.status | default(0) == 200)
         fail_msg: |
           Сервис недоступен или вернул неверный статус:
             - URL: http://192.168.56.103:8081/
             - Статус: {{ uri_check.status | default('N/A') }}
             - Ошибка: {{ uri_check.msg | default('Нет сообщения об ошибке') }}
+      when: not ansible_check_mode or uri_check is defined
