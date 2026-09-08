@@ -41,12 +41,18 @@ jobs:
           ansible-galaxy collection install -r requirements.yml
 
       - name: Syntax-Check
+        env:
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
+          tmp_file=$(mktemp --tmpdir --mode=600 vault_pass_XXXXXX)
+          echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
+          trap "rm -f '$tmp_file'" EXIT
+
           set -euo pipefail
-          ansible-playbook --syntax-check site.yml -i inventory.yml
-          ansible-playbook --syntax-check verify.yml -i inventory.yml
-          ansible-playbook --syntax-check site-backup.yml -i inventory.yml
-          ansible-playbook --syntax-check verify-logrotate.yml -i inventory.yml
+          ansible-playbook --syntax-check site.yml -i inventory.yml --vault-password-file="$tmp_file"
+          ansible-playbook --syntax-check verify.yml -i inventory.yml --vault-password-file="$tmp_file"
+          ansible-playbook --syntax-check site-backup.yml -i inventory.yml --vault-password-file="$tmp_file"
+          ansible-playbook --syntax-check verify-logrotate.yml -i inventory.yml --vault-password-file="$tmp_file"
           ansible-playbook --syntax-check sitessh.yml -i inventory.yml
 
   deploy:
