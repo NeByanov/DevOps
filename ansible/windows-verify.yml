@@ -24,7 +24,7 @@
       ansible.builtin.assert:
         that:
           - win_services_info.state == "running"
-        fail_msg: "ERROR:Служба не запущена, текущее состояние {{ win_services_info[0].state }}"
+        fail_msg: "ERROR:Служба не запущена, текущее состояние {{ win_services_info.state }}"
         success_msg: "SUCCESS:Служба WinRM запущена"
         quiet: true
 
@@ -32,7 +32,7 @@
       ansible.builtin.assert:
         that:
           - win_services_info.start_mode == "auto"
-        fail_msg: "ERROR:Служба не запущена, текущее состояние {{ win_services_info[0].start_mode }}"
+        fail_msg: "ERROR:Служба не запущена, текущее состояние {{ win_services_info.start_mode }}"
         success_msg: "SUCCESS:WinRM имеет автозапуск"
         quiet: true
 
