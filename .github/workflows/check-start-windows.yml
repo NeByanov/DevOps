@@ -27,11 +27,10 @@ jobs:
     - name: Check ansible version
       run: /home/vboxuser/.local/bin/ansible --version
 
-    - name: Run with temp vault file (secure)
+    - name: Run playbook with vault
       env:
-        VAULT_PASSWORD: ${{ secrets.VAULT_PASSWORD }}
+        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
       run: |
-
         tmp_file=$(mktemp --tmpdir vault_pass_XXXXXX)
         echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
         chmod 600 "$tmp_file"
