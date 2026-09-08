@@ -42,18 +42,18 @@ jobs:
 
       - name: Syntax-Check
         env:
-          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          ANSIBLE_VAULT_PASSWORD_FILE: "$tmp_file"
         run: |
           tmp_file=$(mktemp --tmpdir vault_pass_XXXXXX)
-          echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
+          echo "{{ secrets.$ANSIBLE_VAULT_PASSWORD }}" > "$tmp_file"
           chmod 600 "$tmp_file"
           trap "rm -f '$tmp_file'" EXIT
 
           set -euo pipefail
-          ansible-playbook --syntax-check site.yml -i inventory.yml --vault-password-file="$tmp_file"
-          ansible-playbook --syntax-check verify.yml -i inventory.yml --vault-password-file="$tmp_file"
-          ansible-playbook --syntax-check site-backup.yml -i inventory.yml --vault-password-file="$tmp_file"
-          ansible-playbook --syntax-check verify-logrotate.yml -i inventory.yml --vault-password-file="$tmp_file"
+          ansible-playbook --syntax-check site.yml -i inventory.yml
+          ansible-playbook --syntax-check verify.yml -i inventory.yml
+          ansible-playbook --syntax-check site-backup.yml -i inventory.yml
+          ansible-playbook --syntax-check verify-logrotate.yml -i inventory.yml
           ansible-playbook --syntax-check sitessh.yml -i inventory.yml
 
   deploy:
