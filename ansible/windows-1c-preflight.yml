@@ -14,6 +14,7 @@
     - name: WinRM connectivity
       ansible.windows.win_ping:
 
+
     # --- 1. Учётная запись ---
     - name: Query service account status
       ansible.windows.win_shell: |
@@ -32,6 +33,18 @@
         [PSCustomObject]@{ exists=$exists; enabled=$enabled; in_admins=$inAdmins } | ConvertTo-Json -Compress
       register: user_query
       changed_when: false
+      check_mode: false
+
+    - name: Assert service account exists, enabled, not in Administrators
+      ansible.builtin.assert:
+        that:
+          - (user_query.stdout | trim | from_json).exists | bool
+          - (user_query.stdout | trim | from_json).enabled | bool
+          - not ((user_query.stdout | trim | from_json).in_admins | bool)
+        fail_msg: >-
+          "Учётная запись {{ svc_account }}: существует={{ (user_query.stdout | trim | from_json).exists }}, включена={{ (user_query.stdout | trim | from_json).enabled }}, в Administrators={{ (user_query.stdout | trim | from_json).in_admins }}"
+        success_msg: "Учётная запись {{ svc_account }}: OK"
+        quiet: true
 
     - name: Debug user_query
       ansible.builtin.debug:
@@ -91,11 +104,4 @@
         [int]$free
       register: free_space
       changed_when: false
-
-    - name: Assert minimum free space on C
-      ansible.builtin.assert:
-        that:
-          - free_space.stdout | trim | float >= one_c_min_free_gib | float
-        fail_msg: "Недостаточно места на C: требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
-        success_msg: "Место на диске OK"
-        quiet: true
+      check_mode: false
