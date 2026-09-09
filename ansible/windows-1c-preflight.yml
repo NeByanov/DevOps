@@ -10,7 +10,7 @@
     # --- 1. Учётная запись: существует, включена, не в Administrators ---
     - name: Query service account status
       ansible.windows.win_shell: |
-        $user = Get-LocalUser -Name "{{ svc_account }}" -ErrorAction SilentlyContinue
+        $user = Get-LocalUser -Name "{{ one_c_user }}" -ErrorAction SilentlyContinue
         $exists = $null -ne $user
         $enabled = $false
         $inAdmins = $false
@@ -34,8 +34,8 @@
           - (user_query.stdout | trim | from_json).enabled | bool
           - not ((user_query.stdout | trim | from_json).in_admins | bool)
         fail_msg: >-
-          "Учётная запись {{ svc_account }}: существует={{ (user_query.stdout | trim | from_json).exists }}, включена={{ (user_query.stdout | trim | from_json).enabled }}, в Administrators={{ (user_query.stdout | trim | from_json).in_admins }}"
-        success_msg: "Учётная запись {{ svc_account }}: OK"
+          "Учётная запись {{ one_c_user }}: существует={{ (user_query.stdout | trim | from_json).exists }}, включена={{ (user_query.stdout | trim | from_json).enabled }}, в Administrators={{ (user_query.stdout | trim | from_json).in_admins }}"
+        success_msg: "Учётная запись {{ one_c_user }}: OK"
         quiet: true
 
     # --- 2. Папки ---
