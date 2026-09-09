@@ -90,7 +90,7 @@
       register: free_space
       changed_when: false
 
-    - name: Assert minimum free space on C:
+    - name: Assert minimum free space on disk C
       ansible.builtin.assert:
         that:
           - free_space.stdout | trim | float >= one_c_min_free_gib | float
