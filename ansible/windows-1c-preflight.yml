@@ -3,19 +3,11 @@
   hosts: windows_hosts
   gather_facts: false
 
-  vars:
-    svc_account: "svc_1c_lab"
-    required_dirs:
-      - "C:\\1C-lab"
-      - "C:\\1C-lab\\data"
-      - "C:\\1C-lab\\logs"
-
   tasks:
     - name: WinRM connectivity
       ansible.windows.win_ping:
 
-
-    # --- 1. Учётная запись ---
+    # --- 1. Учётная запись: существует, включена, не в Administrators ---
     - name: Query service account status
       ansible.windows.win_shell: |
         $user = Get-LocalUser -Name "{{ svc_account }}" -ErrorAction SilentlyContinue
@@ -46,21 +38,6 @@
         success_msg: "Учётная запись {{ svc_account }}: OK"
         quiet: true
 
-    - name: Debug user_query
-      ansible.builtin.debug:
-        var: user_query
-
-    - name: Assert service account exists, enabled, not in Administrators
-      ansible.builtin.assert:
-        that:
-          - (user_query.stdout | trim | from_json).exists | bool
-          - (user_query.stdout | trim | from_json).enabled | bool
-          - not ((user_query.stdout | trim | from_json).in_admins | bool)
-        fail_msg: >-
-          "Учётная запись {{ svc_account }}: существует={{ (user_query.stdout | trim | from_json).exists }}, включена={{ (user_query.stdout | trim | from_json).enabled }}, в Administrators={{ (user_query.stdout | trim | from_json).in_admins }}"
-        success_msg: "Учётная запись {{ svc_account }}: OK"
-        quiet: true
-
     # --- 2. Папки ---
     - name: Stat all required directories
       ansible.windows.win_stat:
@@ -69,7 +46,7 @@
       register: dirs_check
       changed_when: false
 
-    - name: Assert all directories exist
+    - name: Assert all directories exist and are directories
       ansible.builtin.assert:
         that:
           - item.stat.exists | default(false)
@@ -97,7 +74,7 @@
         success_msg: "SeServiceLogonRight OK"
         quiet: true
 
-    # --- 4. Свободное место ---
+    # --- 4. Свободное место на системном диске ---
     - name: Get free space on C in GiB
       ansible.windows.win_shell: |
         $free = (Get-PSDrive C).Free / 1GB
@@ -105,3 +82,11 @@
       register: free_space
       changed_when: false
       check_mode: false
+
+    - name: Assert minimum free space on C
+      ansible.builtin.assert:
+        that:
+          - free_space.stdout | trim | float >= one_c_min_free_gib | float
+        fail_msg: "Недостаточно места на C: требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
+        success_msg: "Свободное место на C: {{ free_space.stdout | trim }} GiB (требуется {{ one_c_min_free_gib }} GiB)"
+        quiet: true
