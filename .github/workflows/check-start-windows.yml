@@ -29,16 +29,10 @@ jobs:
 
     - name: Run playbook with vault
       env:
-        ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        ANSIBLE_VAULT_PASSWORD_FILE: "${{ runner.temp }}/vault_pass"
       run: |
-        tmp_file=$(mktemp --tmpdir vault_pass_XXXXXX)
-        echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
+        tmp_file="${{ runner.temp }}/vault_pass"
+        echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > "$tmp_file"
         chmod 600 "$tmp_file"
         trap "rm -f '$tmp_file'" EXIT
-
-        /home/vboxuser/.local/bin/ansible-playbook \
-          -i inventory.yml \
-          windows-verify.yml \
-          --check \
-          --vault-password-file="$tmp_file"
-
+        ansible-playbook -i inventory.yml windows-verify.yml --check
