@@ -3,6 +3,12 @@
   hosts: windows_hosts
   gather_facts: false
 
+  vars:
+    required_dirs:
+      - "{{ one_c_path }}"
+      - "{{ one_c_data_dir }}"
+      - "{{ one_c_logs_dir }}"
+
   tasks:
     - name: WinRM connectivity
       ansible.windows.win_ping:
@@ -61,7 +67,7 @@
     - name: Check SeServiceLogonRight (read-only)
       ansible.windows.win_user_right:
         name: SeServiceLogonRight
-        users: "{{ svc_account }}"
+        users: "{{ one_c_user }}"
         action: add
       check_mode: true
       register: right_check
@@ -70,7 +76,7 @@
       ansible.builtin.assert:
         that:
           - not (right_check.changed | bool)
-        fail_msg: "SeServiceLogonRight отсутствует у {{ svc_account }}"
+        fail_msg: "SeServiceLogonRight отсутствует у {{ one_c_user }}"
         success_msg: "SeServiceLogonRight OK"
         quiet: true
 
