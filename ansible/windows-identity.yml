@@ -12,9 +12,9 @@
         state: present
         account_disabled: false
         password_never_expires: true
+        update_password: on_create
         user_cannot_change_password: true
       no_log: true
-
 
     - name: Resolve Administrators group name from SID
       ansible.windows.win_shell: |
