@@ -49,13 +49,18 @@ jobs:
         uses: actions/checkout@v6
 
 
-      - name: Run playbook with vault
-        env:
-          ANSIBLE_VAULT_PASSWORD_FILE: "${{ runner.temp }}/vault_pass"
-        run: |
-          tmp_file="${{ runner.temp }}/vault_pass"
-          echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > "$tmp_file"
-          chmod 600 "$tmp_file"
-          trap "rm -f '$tmp_file'" EXIT
 
-          ansible-playbook windows-1c-preflight.yml -i inventory.yml --check
+      - name: Run Preflight Playbook
+        env:
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          # Создаем временный файл с правильными правами (600)
+          tmp_file=$(mktemp --tmpdir --mode=600 vault_pass_XXXXXX)
+          echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
+
+          # Запускаем плейбук, указывая этот файл
+          ansible-playbook ansible/windows-1c-preflight.yml \
+            --vault-password-file "$tmp_file"
+
+          # Удаляем файл (автоматически при выходе, но явно для чистоты)
+          rm -f "$tmp_file"
