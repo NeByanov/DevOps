@@ -16,7 +16,7 @@
 
     # --- 1. Учётная запись ---
     - name: Query service account status
-      ansible.windows.win_command: |
+      ansible.windows.win_shell: |
         $user = Get-LocalUser -Name "{{ svc_account }}" -ErrorAction SilentlyContinue
         $exists = $null -ne $user
         $enabled = $false
@@ -33,10 +33,9 @@
       register: user_query
       changed_when: false
 
-    - name: Debug user_query (для проверки структуры)
+    - name: Debug user_query
       ansible.builtin.debug:
         var: user_query
-      when: ansible_verbosity >= 2
 
     - name: Assert service account exists, enabled, not in Administrators
       ansible.builtin.assert:
@@ -87,7 +86,7 @@
 
     # --- 4. Свободное место ---
     - name: Get free space on C in GiB
-      ansible.windows.win_command: |
+      ansible.windows.win_shell: |
         $free = (Get-PSDrive C).Free / 1GB
         [int]$free
       register: free_space
@@ -97,7 +96,6 @@
       ansible.builtin.assert:
         that:
           - free_space.stdout | trim | float >= one_c_min_free_gib | float
-        fail_msg: >-
-          "Недостаточно места на C: требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
+        fail_msg: "Недостаточно места на C: требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
         success_msg: "Место на диске OK"
         quiet: true
