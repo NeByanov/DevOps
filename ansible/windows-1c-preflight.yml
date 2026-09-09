@@ -85,7 +85,7 @@
       ansible.windows.win_user_right:
         name: SeServiceLogonRight
         users: "{{ svc_account }}"
-        state: present
+        action: add
       check_mode: true
       register: right_check
 
