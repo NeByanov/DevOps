@@ -32,3 +32,4 @@ all:
         one_c_path: C:\1C-lab
         one_c_data_dir: C:\1C-lab\data
         one_c_logs_dir: C:\1C-lab\logs
+        one_c_min_free_gib: 10

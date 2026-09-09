@@ -1,0 +1,99 @@
+---
+- name: Windows preflight
+  hosts: windows_hosts
+  gather_facts: false
+
+  vars:
+    svc_account: "svc_1c_lab"
+    required_dirs:
+      - "C:\\1C-lab"
+      - "C:\\1C-lab\\data"
+      - "C:\\1C-lab\\logs"
+
+  tasks:
+    - name: WinRM connectivity
+      ansible.windows.win_ping:
+
+    # --- 1. Учётная запись: существует, включена, не в Administrators ---
+    - name: Query service account status
+      ansible.windows.win_shell: |
+        $user = Get-LocalUser -Name "{{ svc_account }}" -ErrorAction SilentlyContinue
+        $exists = $null -ne $user
+        $enabled = $false
+        $inAdmins = $false
+        if ($exists) {
+            $enabled = $user.Enabled
+            $members = Get-LocalGroupMember -Group Administrators -ErrorAction SilentlyContinue
+            if ($members) {
+                $names = $members.Name | ForEach-Object { ($_ -split '\\')[-1] }
+                $inAdmins = $names -contains '{{ svc_account }}'
+            }
+        }
+        [PSCustomObject]@{ exists=$exists; enabled=$enabled; in_admins=$inAdmins } | ConvertTo-Json -Compress
+      register: user_query
+      changed_when: false
+
+    - name: Assert service account exists, enabled, not in Administrators
+      ansible.builtin.assert:
+        that:
+          - (user_query.stdout | from_json).exists | bool
+          - (user_query.stdout | from_json).enabled | bool
+          - not ((user_query.stdout | from_json).in_admins | bool)
+        fail_msg: >-
+          Учётная запись {{ svc_account }}:
+          существует={{ (user_query.stdout | from_json).exists }},
+          включена={{ (user_query.stdout | from_json).enabled }},
+          в Administrators={{ (user_query.stdout | from_json).in_admins }}
+        success_msg: "Учётная запись {{ svc_account }}: существует, включена, не в Administrators"
+        quiet: true
+
+    # --- 2. Папки: корневая, data, logs ---
+    - name: Stat all required directories
+      ansible.windows.win_stat:
+        path: "{{ item }}"
+      loop: "{{ required_dirs }}"
+      register: dirs_check
+      changed_when: false
+
+    - name: Assert all directories exist and are directories
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.isdir | default(false)
+        fail_msg: "Папка отсутствует или не является директорией: {{ item.item }}"
+        success_msg: "Папка найдена: {{ item.item }}"
+      loop: "{{ dirs_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # --- 3. SeServiceLogonRight ---
+    - name: Check SeServiceLogonRight (read-only)
+      ansible.windows.win_user_right:
+        name: SeServiceLogonRight
+        users: "{{ svc_account }}"
+        state: present
+      check_mode: true
+      register: right_check
+
+    - name: Assert SeServiceLogonRight is assigned
+      ansible.builtin.assert:
+        that:
+          - not (right_check.changed | bool)
+        fail_msg: "SeServiceLogonRight отсутствует у {{ svc_account }} — право нужно назначить"
+        success_msg: "SeServiceLogonRight назначен учётной записи {{ svc_account }}"
+        quiet: true
+
+    # --- 4. Свободное место на системном диске ---
+    - name: Get free space on C: in GiB
+      ansible.windows.win_shell: |
+        [math]::Round((Get-PSDrive C).Free / 1GB, 1)
+      register: free_space
+      changed_when: false
+
+    - name: Assert minimum free space on C:
+      ansible.builtin.assert:
+        that:
+          - free_space.stdout | trim | float >= one_c_min_free_gib | float
+        fail_msg: "Недостаточно места на C: — требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
+        success_msg: "Свободное место на C: — {{ free_space.stdout | trim }} GiB (требуется {{ one_c_min_free_gib }} GiB)"
+        quiet: true

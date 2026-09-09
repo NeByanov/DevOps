@@ -35,4 +35,29 @@ jobs:
         echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > "$tmp_file"
         chmod 600 "$tmp_file"
         trap "rm -f '$tmp_file'" EXIT
+
         ansible-playbook -i inventory.yml windows-verify.yml --check
+
+  oneC-preflight:
+    name: oneC-preflight
+    runs-on: self-hosted
+    timeout-minutes: 15
+    needs: oneC-preflight
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Run Ansible playbook
+        env:
+          PATH: /home/vboxuser/.local/bin:/usr/local/bin:/usr/bin:/bin
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          tmp_file=$(mktemp --tmpdir vault_pass_XXXXXX)
+          echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
+          chmod 600 "$tmp_file"
+          trap 'rm -f "$tmp_file"' EXIT
+
+          export ANSIBLE_VAULT_PASSWORD_FILE="$tmp_file"
+
+          ansible-playbook windows-1c-preflight.yml -i inventory.yml
