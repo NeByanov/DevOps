@@ -14,9 +14,9 @@
     - name: WinRM connectivity
       ansible.windows.win_ping:
 
-    # --- 1. Учётная запись: существует, включена, не в Administrators ---
+    # --- 1. Учётная запись ---
     - name: Query service account status
-      raw: |
+      ansible.windows.win_shell: |
         $user = Get-LocalUser -Name "{{ svc_account }}" -ErrorAction SilentlyContinue
         $exists = $null -ne $user
         $enabled = $false
@@ -47,7 +47,7 @@
         success_msg: "Учётная запись {{ svc_account }}: существует, включена, не в Administrators"
         quiet: true
 
-    # --- 2. Папки: корневая, data, logs ---
+    # --- 2. Папки ---
     - name: Stat all required directories
       ansible.windows.win_stat:
         path: "{{ item }}"
@@ -83,10 +83,18 @@
         success_msg: "SeServiceLogonRight назначен учётной записи {{ svc_account }}"
         quiet: true
 
-    # --- 4. Свободное место на системном диске ---
+    # --- 4. Свободное место ---
     - name: Get free space on C in GiB
-      raw: |
+      ansible.windows.win_shell: |
         $free = (Get-PSDrive C).Free / 1GB
         [int]$free
       register: free_space
       changed_when: false
+
+    - name: Assert minimum free space on C
+      ansible.builtin.assert:
+        that:
+          - free_space.stdout | trim | float >= one_c_min_free_gib | float
+        fail_msg: "Недостаточно места на C — требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
+        success_msg: "Свободное место на C — {{ free_space.stdout | trim }} GiB (требуется {{ one_c_min_free_gib }} GiB)"
+        quiet: true
