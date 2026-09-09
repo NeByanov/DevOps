@@ -16,7 +16,7 @@
 
     # --- 1. Учётная запись ---
     - name: Query service account status
-      ansible.windows.win_shell: |
+      ansible.builtin.raw: |
         $user = Get-LocalUser -Name "{{ svc_account }}" -ErrorAction SilentlyContinue
         $exists = $null -ne $user
         $enabled = $false
@@ -36,15 +36,15 @@
     - name: Assert service account exists, enabled, not in Administrators
       ansible.builtin.assert:
         that:
-          - (user_query.stdout | from_json).exists | bool
-          - (user_query.stdout | from_json).enabled | bool
-          - not ((user_query.stdout | from_json).in_admins | bool)
+          - (user_query.stdout | trim | from_json).exists | bool
+          - (user_query.stdout | trim | from_json).enabled | bool
+          - not ((user_query.stdout | trim | from_json).in_admins | bool)
         fail_msg: >-
           Учётная запись {{ svc_account }}:
-          существует={{ (user_query.stdout | from_json).exists }},
-          включена={{ (user_query.stdout | from_json).enabled }},
-          в Administrators={{ (user_query.stdout | from_json).in_admins }}
-        success_msg: "Учётная запись {{ svc_account }}: существует, включена, не в Administrators"
+          существует={{ (user_query.stdout | trim | from_json).exists }},
+          включена={{ (user_query.stdout | trim | from_json).enabled }},
+          в Administrators={{ (user_query.stdout | trim | from_json).in_admins }}
+        success_msg: "Учётная запись {{ svc_account }}: OK"
         quiet: true
 
     # --- 2. Папки ---
@@ -55,7 +55,7 @@
       register: dirs_check
       changed_when: false
 
-    - name: Assert all directories exist and are directories
+    - name: Assert all directories exist
       ansible.builtin.assert:
         that:
           - item.stat.exists | default(false)
@@ -79,13 +79,13 @@
       ansible.builtin.assert:
         that:
           - not (right_check.changed | bool)
-        fail_msg: "SeServiceLogonRight отсутствует у {{ svc_account }} — право нужно назначить"
-        success_msg: "SeServiceLogonRight назначен учётной записи {{ svc_account }}"
+        fail_msg: "SeServiceLogonRight отсутствует у {{ svc_account }}"
+        success_msg: "SeServiceLogonRight OK"
         quiet: true
 
     # --- 4. Свободное место ---
     - name: Get free space on C in GiB
-      ansible.windows.win_shell: |
+      ansible.builtin.raw: |
         $free = (Get-PSDrive C).Free / 1GB
         [int]$free
       register: free_space
@@ -95,6 +95,6 @@
       ansible.builtin.assert:
         that:
           - free_space.stdout | trim | float >= one_c_min_free_gib | float
-        fail_msg: "Недостаточно места на C — требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
-        success_msg: "Свободное место на C — {{ free_space.stdout | trim }} GiB (требуется {{ one_c_min_free_gib }} GiB)"
+        fail_msg: "Недостаточно места на C: требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
+        success_msg: "Место на диске OK"
         quiet: true
