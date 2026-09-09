@@ -42,7 +42,7 @@ jobs:
     name: oneC-preflight
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: oneC-preflight
+    needs: windows-service
 
     steps:
       - name: Check out source
