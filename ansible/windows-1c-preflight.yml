@@ -15,27 +15,28 @@
       ansible.windows.win_ping:
 
     # --- 1. Учётная запись ---
-
     - name: Query service account status
-      ansible.windows.win_command: powershell -NoProfile -Command "
-        $user = Get-LocalUser -Name '{{ svc_account }}' -ErrorAction SilentlyContinue;
-        $exists = $null -ne $user;
-        $enabled = $false;
-        $inAdmins = $false;
+      ansible.windows.win_command: |
+        $user = Get-LocalUser -Name "{{ svc_account }}" -ErrorAction SilentlyContinue
+        $exists = $null -ne $user
+        $enabled = $false
+        $inAdmins = $false
         if ($exists) {
-            $enabled = $user.Enabled;
-            $sid = $user.SID.Value;
-            $admins = Get-LocalGroupMember -Group Administrators -ErrorAction SilentlyContinue;
-            if ($admins) { $inAdmins = ($admins.SID.Value -contains $sid) }
-        };
+            $enabled = $user.Enabled
+            $sid = $user.SID.Value
+            $admins = Get-LocalGroupMember -Group Administrators -ErrorAction SilentlyContinue
+            if ($admins) {
+                $inAdmins = ($admins.SID.Value -contains $sid)
+            }
+        }
         [PSCustomObject]@{ exists=$exists; enabled=$enabled; in_admins=$inAdmins } | ConvertTo-Json -Compress
-      "
       register: user_query
       changed_when: false
 
-    - name: Debug user_query
+    - name: Debug user_query (для проверки структуры)
       ansible.builtin.debug:
         var: user_query
+      when: ansible_verbosity >= 2
 
     - name: Assert service account exists, enabled, not in Administrators
       ansible.builtin.assert:
@@ -44,10 +45,7 @@
           - (user_query.stdout | trim | from_json).enabled | bool
           - not ((user_query.stdout | trim | from_json).in_admins | bool)
         fail_msg: >-
-          Учётная запись {{ svc_account }}:
-          существует={{ (user_query.stdout | trim | from_json).exists }},
-          включена={{ (user_query.stdout | trim | from_json).enabled }},
-          в Administrators={{ (user_query.stdout | trim | from_json).in_admins }}
+          "Учётная запись {{ svc_account }}: существует={{ (user_query.stdout | trim | from_json).exists }}, включена={{ (user_query.stdout | trim | from_json).enabled }}, в Administrators={{ (user_query.stdout | trim | from_json).in_admins }}"
         success_msg: "Учётная запись {{ svc_account }}: OK"
         quiet: true
 
@@ -89,7 +87,7 @@
 
     # --- 4. Свободное место ---
     - name: Get free space on C in GiB
-      ansible.builtin.raw: |
+      ansible.windows.win_command: |
         $free = (Get-PSDrive C).Free / 1GB
         [int]$free
       register: free_space
@@ -99,6 +97,7 @@
       ansible.builtin.assert:
         that:
           - free_space.stdout | trim | float >= one_c_min_free_gib | float
-        fail_msg: "Недостаточно места на C: требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
+        fail_msg: >-
+          "Недостаточно места на C: требуется {{ one_c_min_free_gib }} GiB, доступно {{ free_space.stdout | trim }} GiB"
         success_msg: "Место на диске OK"
         quiet: true
