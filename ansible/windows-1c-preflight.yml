@@ -84,7 +84,7 @@
         quiet: true
 
     # --- 4. Свободное место на системном диске ---
-    - name: Get free space on C: in GiB
+    - name: Get free space on disk C in GiB
       ansible.windows.win_shell: |
         [math]::Round((Get-PSDrive C).Free / 1GB, 1)
       register: free_space
