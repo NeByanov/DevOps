@@ -37,30 +37,4 @@ jobs:
         trap "rm -f '$tmp_file'" EXIT
 
         ansible-playbook -i inventory.yml windows-verify.yml --check
-
-  oneC-preflight:
-    name: oneC-preflight
-    runs-on: self-hosted
-    timeout-minutes: 15
-    needs: windows-service
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v6
-
-
-
-      - name: Run Preflight Playbook
-        env:
-          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
-        run: |
-          # Создаем временный файл с правильными правами (600)
-          tmp_file=$(mktemp --tmpdir --mode=600 vault_pass_XXXXXX)
-          echo "$ANSIBLE_VAULT_PASSWORD" > "$tmp_file"
-
-          # Запускаем плейбук, указывая этот файл
-          ansible-playbook ansible/windows-1c-preflight.yml \
-            --vault-password-file "$tmp_file"
-
-          # Удаляем файл (автоматически при выходе, но явно для чистоты)
-          rm -f "$tmp_file"
+        ansible-playbook -i inventory.yml windows-1c-preflight.yml --check
