@@ -1,0 +1,158 @@
+---
+- name: Configure and verify 1C RAS
+  hosts: windows_hosts
+  gather_facts: false
+
+  tasks:
+    - name: Check RAS executable
+      ansible.windows.win_stat:
+        path: "{{ ras_executable }}"
+      register: ras_binary
+
+    - name: Check RAC executable
+      ansible.windows.win_stat:
+        path: "{{ rac_executable }}"
+      register: rac_binary
+
+    - name: Require RAS and RAC binaries
+      ansible.builtin.assert:
+        that:
+          - ras_binary.stat.exists
+          - ras_binary.stat.isreg | default(false)
+          - rac_binary.stat.exists
+          - rac_binary.stat.isreg | default(false)
+        fail_msg: >-
+          RAS or RAC was not found in the configured 1C {{ one_c_version }}
+          installation directory.
+
+    - name: Read 1C agent service
+      ansible.windows.win_service_info:
+        name: "{{ one_c_agent_service_name }}"
+      register: one_c_agent
+
+    - name: Require the running 1C agent service
+      ansible.builtin.assert:
+        that:
+          - one_c_agent.exists
+          - >-
+            one_c_agent.services | default([])
+            | selectattr('state', 'equalto', 'started')
+            | list | length == 1
+        fail_msg: >-
+          The 1C agent service {{ one_c_agent_service_name }} is absent or
+          is not running.
+
+    - name: Grant service logon right to the RAS account
+      ansible.windows.win_user_right:
+        name: SeServiceLogonRight
+        users:
+          - '.\{{ one_c_user }}'
+        action: add
+
+    - name: Configure and start the RAS service
+      ansible.windows.win_service:
+        name: "{{ ras_service_name }}"
+        display_name: "{{ ras_service_display_name }}"
+        description: "1C cluster administration server on TCP {{ ras_port }}"
+        path: >-
+          "{{ ras_executable }}" cluster --service --port={{ ras_port }}
+          {{ ras_agent_address }}:{{ ras_agent_port }}
+        username: '.\{{ one_c_user }}'
+        password: "{{ one_c_service_password }}"
+        update_password: on_create
+        start_mode: auto
+        dependencies:
+          - "{{ one_c_agent_service_name }}"
+        dependency_action: add
+        state: started
+      no_log: true
+      notify: Restart RAS after configuration change
+
+    - name: Apply a pending RAS restart before verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Allow RAS only from the VirtualBox Host-Only subnet
+      community.windows.win_firewall_rule:
+        name: "1C RAS (TCP {{ ras_port }}) — Allow {{ ras_allowed_subnet }}"
+        description: >-
+          Allow 1C RAS only from the VirtualBox Host-Only subnet.
+        enabled: true
+        state: present
+        direction: in
+        action: allow
+        protocol: tcp
+        localip: "{{ ansible_host }}"
+        localport: "{{ ras_port }}"
+        remoteip: "{{ ras_allowed_subnet }}"
+        profiles: domain,private,public
+
+    - name: Block direct inbound access to 1C agent ports
+      community.windows.win_firewall_rule:
+        name: "1C Agent (TCP {{ item }}) — Block all inbound"
+        description: >-
+          Prevent direct network access to the 1C agent and cluster manager.
+        enabled: true
+        state: present
+        direction: in
+        action: block
+        protocol: tcp
+        localport: "{{ item }}"
+        remoteip: any
+        profiles: domain,private,public
+      loop: "{{ ras_blocked_agent_ports }}"
+
+    - name: Verify the configured RAS service
+      when: not ansible_check_mode
+      block:
+        - name: Wait for the local RAS listener
+          ansible.windows.win_wait_for:
+            host: "{{ ras_agent_address }}"
+            port: "{{ ras_port }}"
+            state: started
+            connect_timeout: 2
+            timeout: 60
+
+        - name: Query the cluster list through RAS
+          ansible.windows.win_command:
+            argv:
+              - "{{ rac_executable }}"
+              - cluster
+              - list
+              - "{{ ras_agent_address }}:{{ ras_port }}"
+          register: rac_clusters
+          changed_when: false
+          failed_when: >-
+            rac_clusters.rc != 0 or
+            (rac_clusters.stdout | trim | length) == 0
+
+        - name: Verify RAS is reachable from the Host-Only controller
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host }}"
+            port: "{{ ras_port }}"
+            state: started
+            connect_timeout: 2
+            timeout: 15
+          delegate_to: localhost
+
+        - name: Verify 1C agent ports are not exposed to the controller
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host }}"
+            port: "{{ item }}"
+            state: stopped
+            connect_timeout: 1
+            timeout: 5
+          loop: "{{ ras_blocked_agent_ports }}"
+          delegate_to: localhost
+
+        - name: Report successful RAS verification
+          ansible.builtin.debug:
+            msg: >-
+              RAS is running on {{ ansible_host }}:{{ ras_port }}, RAC returned
+              a cluster list, and ports {{ ras_blocked_agent_ports | join(', ') }}
+              are not reachable from the controller.
+
+  handlers:
+    - name: Restart RAS after configuration change
+      ansible.windows.win_service:
+        name: "{{ ras_service_name }}"
+        state: restarted

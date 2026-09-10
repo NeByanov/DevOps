@@ -52,6 +52,7 @@ vault_pass.txt
 
 # misc
 .DS_Store
+*.swp
 *.pem
 
 # debug

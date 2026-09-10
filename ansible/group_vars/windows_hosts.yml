@@ -4,6 +4,20 @@ ansible_winrm_server_cert_validation: ignore
 ansible_winrm_read_timeout_sec: 30
 ansible_winrm_operation_timeout_sec: 20
 
+# 1C RAS configuration
+one_c_version: "8.5.1.1522"
+one_c_bin_dir: 'C:\Program Files (x86)\1cv8\{{ one_c_version }}\bin'
+
+ras_service_name: "1CRAS"
+ras_service_display_name: "1C:Enterprise RAS"
+ras_port: 1545
+ras_agent_address: "127.0.0.1"
+ras_agent_port: 1540
+ras_allowed_subnet: "192.168.56.0/24"
+ras_blocked_agent_ports: [1540, 1541]
+ras_executable: '{{ one_c_bin_dir }}\ras.exe'
+rac_executable: '{{ one_c_bin_dir }}\rac.exe'
+
 ansible_winrm_password: !vault |
           $ANSIBLE_VAULT;1.1;AES256
           37653864633733666266356135383665663833333433393365373033393231303237653635643665
