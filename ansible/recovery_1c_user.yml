@@ -1,0 +1,46 @@
+---
+- name: Recover 1C server agent
+  hosts: windows_hosts
+  gather_facts: false
+
+  tasks:
+    - name: Reset and unlock 1C service account
+      ansible.windows.win_user:
+        name: "{{ one_c_user }}"
+        password: "{{ one_c_service_password }}"
+        state: present
+        account_disabled: false
+        account_locked: false
+        password_never_expires: true
+        user_cannot_change_password: true
+        update_password: always
+      no_log: true
+
+    - name: Ensure service logon right
+      ansible.windows.win_user_right:
+        name: SeServiceLogonRight
+        users:
+          - ".\\{{ one_c_user }}"
+        action: add
+
+    - name: Set correct service credentials and start agent
+      ansible.windows.win_service:
+        name: "{{ one_c_agent_service_name }}"
+        username: ".\\{{ one_c_user }}"
+        password: "{{ one_c_service_password }}"
+        update_password: always
+        start_mode: auto
+        state: started
+      no_log: true
+
+    - name: Read agent state
+      ansible.windows.win_service_info:
+        name: "{{ one_c_agent_service_name }}"
+      register: one_c_agent
+
+    - name: Assert agent is running
+      ansible.builtin.assert:
+        that:
+          - one_c_agent.exists
+          - one_c_agent.services[0].state == "started"
+          - one_c_agent.services[0].start_mode == "auto"

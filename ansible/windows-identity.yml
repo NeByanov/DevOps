@@ -8,7 +8,7 @@
     - name: Create and enable local user svc_1c_lab
       ansible.windows.win_user:
         name: "{{ one_c_user }}"
-        password: "{{ ansible_winrm_password_1c_user }}"
+        password: "{{ one_c_service_password }}"
         state: present
         account_disabled: false
         password_never_expires: true
