@@ -1,0 +1,76 @@
+---
+- name: Configure and verify 1C RAS
+  hosts: windows_hosts
+  gather_facts: false
+
+  tasks:
+    - name: Query the cluster list through RAS
+      ansible.windows.win_command:
+        argv:
+          - "{{ rac_executable }}"
+          - cluster
+          - list
+          - "{{ ras_agent_address }}:{{ ras_port }}"
+      register: rac_clusters
+      changed_when: false
+
+    - name: Extract cluster ID
+      ansible.builtin.set_fact:
+        cluster_id: >-
+          {{
+            rac_clusters.stdout_lines
+            | select('match', '^\s*cluster\s*:')
+            | first
+            | regex_replace('^\s*cluster\s*:\s*', '')
+          }}
+      changed_when: false
+
+    - name: Query the server list through RAS
+      ansible.windows.win_command:
+        argv:
+          - "{{ rac_executable }}"
+          - server
+          - list
+          - "{{ ras_agent_address }}:{{ ras_port }}"
+          - "--cluster={{ cluster_id }}"
+      register: rac_server
+      changed_when: false
+
+    - name: Query the process list through RAS
+      ansible.windows.win_command:
+        argv:
+          - "{{ rac_executable }}"
+          - process
+          - list
+          - "{{ ras_agent_address }}:{{ ras_port }}"
+          - "--cluster={{ cluster_id }}"
+      register: rac_process
+      changed_when: false
+
+    - name: Query the session list through RAS
+      ansible.windows.win_command:
+        argv:
+          - "{{ rac_executable }}"
+          - session
+          - list
+          - "{{ ras_agent_address }}:{{ ras_port }}"
+          - "--cluster={{ cluster_id }}"
+      register: rac_session
+      changed_when: false
+
+
+    - name: Show clusters
+      ansible.builtin.debug:
+        var: rac_clusters.stdout_lines
+
+    - name: Show servers
+      ansible.builtin.debug:
+        var: rac_server.stdout_lines
+
+    - name: Show processes
+      ansible.builtin.debug:
+        var: rac_process.stdout_lines
+
+    - name: Show sessions
+      ansible.builtin.debug:
+        var: rac_session.stdout_lines
