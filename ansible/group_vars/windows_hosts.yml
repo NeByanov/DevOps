@@ -1,12 +1,21 @@
 ansible_connection: winrm
 ansible_winrm_transport: ntlm
 ansible_winrm_server_cert_validation: ignore
-ansible_winrm_read_timeout_sec: 30
-ansible_winrm_operation_timeout_sec: 20
+ansible_winrm_read_timeout_sec: 70
+ansible_winrm_operation_timeout_sec: 60
 
 # 1C RAS configuration
 one_c_version: "8.5.1.1522"
 one_c_bin_dir: 'C:\Program Files (x86)\1cv8\{{ one_c_version }}\bin'
+one_c_install_srvinfo_dir: 'C:\Program Files (x86)\1cv8\srvinfo'
+one_c_srvinfo_dir: 'C:\1C-lab\srvinfo'
+one_c_srvinfo_staging_dir: '{{ one_c_srvinfo_dir }}.incomplete'
+one_c_srvinfo_copy_marker: '{{ one_c_srvinfo_dir }}\.ansible-copy-complete'
+one_c_backup_dir: 'C:\1C-lab\backup'
+one_c_backup_staging_dir: '{{ one_c_backup_dir }}.incomplete'
+one_c_backup_copy_marker: '{{ one_c_backup_dir }}\.ansible-copy-complete'
+one_c_original_cluster_id_file: '{{ one_c_backup_dir }}\cluster-id-before-migration.txt'
+one_c_migration_complete_marker: '{{ one_c_path }}\.srvinfo-migration-complete'
 
 ras_service_name: "1CRAS"
 ras_service_display_name: "1C:Enterprise RAS"

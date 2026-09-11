@@ -1,0 +1,1201 @@
+---
+- name: Back up and migrate the 1C agent srvinfo directory
+  hosts: windows_hosts
+  gather_facts: false
+
+  tasks:
+    - name: Validate migration paths before any destructive action
+      ansible.builtin.assert:
+        that:
+          - one_c_install_srvinfo_dir | length > 3
+          - one_c_srvinfo_dir | length > 3
+          - one_c_backup_dir | length > 3
+          - (one_c_install_srvinfo_dir | lower) != (one_c_srvinfo_dir | lower)
+          - (one_c_install_srvinfo_dir | lower) != (one_c_backup_dir | lower)
+          - (one_c_srvinfo_dir | lower) != (one_c_backup_dir | lower)
+          - one_c_srvinfo_staging_dir == one_c_srvinfo_dir ~ '.incomplete'
+          - one_c_backup_staging_dir == one_c_backup_dir ~ '.incomplete'
+        fail_msg: The configured srvinfo migration paths are unsafe.
+
+    - name: Check the original srvinfo directory
+      ansible.windows.win_stat:
+        path: "{{ one_c_install_srvinfo_dir }}"
+      register: original_srvinfo
+
+    - name: Read the 1C agent service
+      ansible.windows.win_service_info:
+        name: "{{ one_c_agent_service_name }}"
+      register: one_c_agent
+
+    - name: Read the RAS service
+      ansible.windows.win_service_info:
+        name: "{{ ras_service_name }}"
+      register: one_c_ras
+
+    - name: Require the original state and both Windows services
+      ansible.builtin.assert:
+        that:
+          - original_srvinfo.stat.exists
+          - original_srvinfo.stat.isdir | default(false)
+          - one_c_agent.exists
+          - one_c_agent.services | length == 1
+          - one_c_ras.exists
+          - one_c_ras.services | length == 1
+        fail_msg: The original srvinfo directory, 1C agent, or RAS is missing.
+
+    - name: Save the current agent command line
+      ansible.builtin.set_fact:
+        one_c_agent_current_path: "{{ one_c_agent.services[0].path | trim }}"
+
+    - name: Require the existing agent port and worker range parameters
+      ansible.builtin.assert:
+        that:
+          - >-
+            (one_c_agent_current_path
+            | regex_search('(?i)(?:^|\s)-regport(?:\s+|=)1541(?:\s|$)'))
+            is not none
+          - >-
+            (one_c_agent_current_path
+            | regex_search('(?i)(?:^|\s)-port(?:\s+|=)1540(?:\s|$)'))
+            is not none
+          - >-
+            (one_c_agent_current_path
+            | regex_search('(?i)(?:^|\s)-range(?:\s+|=)1560:1591(?:\s|$)'))
+            is not none
+        fail_msg: >-
+          The live agent command does not contain the expected 1541/1540 ports
+          and 1560:1591 worker range; refusing to rebuild its ImagePath.
+
+    - name: Build source and target data-directory patterns
+      ansible.builtin.set_fact:
+        one_c_original_data_pattern: >-
+          (?i)(?:^|\s)[-/]d(?:\s+|=)"?{{ one_c_install_srvinfo_dir | regex_escape }}"?(?:\s|$)
+        one_c_target_data_pattern: >-
+          (?i)(?:^|\s)[-/]d(?:\s+|=)"?{{ one_c_srvinfo_dir | regex_escape }}"?(?:\s|$)
+
+    - name: Identify the current agent data directory
+      ansible.builtin.set_fact:
+        one_c_agent_uses_original: >-
+          {{ (one_c_agent_current_path
+              | regex_search(one_c_original_data_pattern)) is not none }}
+        one_c_agent_uses_target: >-
+          {{ (one_c_agent_current_path
+              | regex_search(one_c_target_data_pattern)) is not none }}
+
+    - name: Build the desired agent command without changing other arguments
+      ansible.builtin.set_fact:
+        one_c_agent_path_without_data_dir: >-
+          {{ one_c_agent_current_path
+             | regex_replace('(?i)\s+[-/]d(?:=|\s+)(?:"[^"]*"|\S+)', '')
+             | trim }}
+
+    - name: Add the new srvinfo directory to the preserved agent command
+      ansible.builtin.set_fact:
+        one_c_agent_desired_path: >-
+          {{ one_c_agent_path_without_data_dir }} -d "{{ one_c_srvinfo_dir }}"
+
+    - name: Inspect finalized migration paths and markers
+      ansible.windows.win_stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ one_c_backup_dir }}"
+        - "{{ one_c_backup_copy_marker }}"
+        - "{{ one_c_original_cluster_id_file }}"
+        - "{{ one_c_srvinfo_dir }}"
+        - "{{ one_c_srvinfo_copy_marker }}"
+        - "{{ one_c_migration_complete_marker }}"
+      register: one_c_migration_paths
+
+    - name: Map the migration state
+      ansible.builtin.set_fact:
+        one_c_backup_stat: "{{ one_c_migration_paths.results[0].stat }}"
+        one_c_backup_marker_stat: "{{ one_c_migration_paths.results[1].stat }}"
+        one_c_original_id_stat: "{{ one_c_migration_paths.results[2].stat }}"
+        one_c_srvinfo_stat: "{{ one_c_migration_paths.results[3].stat }}"
+        one_c_srvinfo_marker_stat: "{{ one_c_migration_paths.results[4].stat }}"
+        one_c_migration_marker_stat: "{{ one_c_migration_paths.results[5].stat }}"
+
+    - name: Refuse inconsistent backup or migration state
+      ansible.builtin.assert:
+        that:
+          - >-
+            (not one_c_backup_stat.exists and
+             not one_c_backup_marker_stat.exists and
+             not one_c_original_id_stat.exists) or
+            (one_c_backup_stat.exists and
+             (one_c_backup_stat.isdir | default(false)) and
+             one_c_backup_marker_stat.exists and
+             (one_c_backup_marker_stat.isreg | default(false)) and
+             one_c_original_id_stat.exists and
+             (one_c_original_id_stat.isreg | default(false)))
+          - >-
+            (not one_c_srvinfo_stat.exists and
+             not one_c_srvinfo_marker_stat.exists) or
+            (one_c_srvinfo_stat.exists and
+             (one_c_srvinfo_stat.isdir | default(false)) and
+             one_c_srvinfo_marker_stat.exists and
+             (one_c_srvinfo_marker_stat.isreg | default(false)))
+          - >-
+            not one_c_migration_marker_stat.exists or
+            (one_c_backup_marker_stat.exists and
+             one_c_srvinfo_marker_stat.exists)
+          - >-
+            not one_c_agent_uses_target or one_c_srvinfo_marker_stat.exists
+          - >-
+            one_c_backup_marker_stat.exists or one_c_agent_uses_original
+        fail_msg: >-
+          Final directories, completion markers, and the current agent path are
+          inconsistent. Nothing was overwritten; inspect the paths manually.
+
+    - name: Ensure the 1C agent is running before reading its cluster ID
+      ansible.windows.win_service:
+        name: "{{ one_c_agent_service_name }}"
+        start_mode: auto
+        state: started
+
+    - name: Wait for the local 1C agent
+      ansible.windows.win_wait_for:
+        host: "{{ ras_agent_address }}"
+        port: "{{ ras_agent_port }}"
+        state: started
+        connect_timeout: 2
+        timeout: 60
+      when: not ansible_check_mode
+
+    - name: Ensure RAS is running before reading the cluster ID
+      ansible.windows.win_service:
+        name: "{{ ras_service_name }}"
+        start_mode: auto
+        state: started
+
+    - name: Wait for RAS before reading the cluster ID
+      ansible.windows.win_wait_for:
+        host: "{{ ras_agent_address }}"
+        port: "{{ ras_port }}"
+        state: started
+        connect_timeout: 2
+        timeout: 60
+      when: not ansible_check_mode
+
+    - name: Read the cluster ID before migration
+      ansible.windows.win_command:
+        argv:
+          - "{{ rac_executable }}"
+          - cluster
+          - list
+          - "{{ ras_agent_address }}:{{ ras_port }}"
+      register: one_c_clusters_before
+      changed_when: false
+      check_mode: false
+
+    - name: Extract cluster IDs before migration
+      ansible.builtin.set_fact:
+        one_c_cluster_ids_before: >-
+          {{ one_c_clusters_before.stdout
+             | regex_findall('(?im)^\s*cluster\s*:\s*([0-9A-Fa-f-]{36})\s*$') }}
+
+    - name: Require exactly one cluster before migration
+      ansible.builtin.assert:
+        that:
+          - one_c_cluster_ids_before | length == 1
+        fail_msg: Exactly one 1C cluster is required before migration.
+
+    - name: Save the live cluster ID in memory
+      ansible.builtin.set_fact:
+        one_c_live_cluster_id: "{{ one_c_cluster_ids_before | first | lower }}"
+
+    - name: Read the immutable original cluster ID
+      ansible.windows.slurp:
+        src: "{{ one_c_original_cluster_id_file }}"
+      register: one_c_saved_cluster_id_raw
+      when: one_c_backup_marker_stat.exists
+
+    - name: Use the saved cluster ID as the expected value
+      ansible.builtin.set_fact:
+        one_c_expected_cluster_id: >-
+          {{ one_c_saved_cluster_id_raw.content | b64decode | trim | lower }}
+      when: one_c_backup_marker_stat.exists
+
+    - name: Use the current cluster ID for the first migration
+      ansible.builtin.set_fact:
+        one_c_expected_cluster_id: "{{ one_c_live_cluster_id }}"
+      when: not one_c_backup_marker_stat.exists
+
+    - name: Require the saved and live cluster IDs to match
+      ansible.builtin.assert:
+        that:
+          - one_c_expected_cluster_id is match('^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$')
+          - one_c_live_cluster_id == one_c_expected_cluster_id
+        fail_msg: >-
+          The live cluster ID differs from the immutable pre-migration value.
+          Migration has been stopped.
+
+    - name: Decide whether the services must be interrupted
+      ansible.builtin.set_fact:
+        one_c_migration_required: >-
+          {{ (not one_c_migration_marker_stat.exists) or
+             ((one_c_agent_current_path | lower | trim) !=
+              (one_c_agent_desired_path | lower | trim)) }}
+
+    - name: Initialize the ImagePath transaction state
+      ansible.builtin.set_fact:
+        one_c_agent_path_update_attempted: false
+
+    - name: Query active sessions before interrupting the agent
+      ansible.windows.win_command:
+        argv:
+          - "{{ rac_executable }}"
+          - session
+          - list
+          - "{{ ras_agent_address }}:{{ ras_port }}"
+          - "--cluster={{ one_c_expected_cluster_id }}"
+      register: one_c_sessions_before_migration
+      changed_when: false
+      when: one_c_migration_required and not ansible_check_mode
+
+    - name: Refuse to interrupt an agent with active sessions
+      ansible.builtin.assert:
+        that:
+          - >-
+            (one_c_sessions_before_migration.stdout_lines
+             | select('match', '^\s*session\s*:') | list | length) == 0
+        fail_msg: >-
+          Active 1C sessions exist. Close them before migrating srvinfo.
+      when: one_c_migration_required and not ansible_check_mode
+
+    - name: Refresh the running agent process ID before interruption
+      ansible.windows.win_service_info:
+        name: "{{ one_c_agent_service_name }}"
+      register: one_c_agent_before_interruption
+      when: one_c_migration_required and not ansible_check_mode
+
+    - name: Require a running agent process before interruption
+      ansible.builtin.assert:
+        that:
+          - one_c_agent_before_interruption.exists
+          - one_c_agent_before_interruption.services | length == 1
+          - one_c_agent_before_interruption.services[0].process_id | int > 0
+        fail_msg: The 1C agent has no running SCM process to capture safely.
+      when: one_c_migration_required and not ansible_check_mode
+
+    - name: Capture only this agent process tree before interruption
+      ansible.windows.win_powershell:
+        depth: 5
+        error_action: stop
+        script: |
+          param(
+            [uint32]$RootProcessId,
+            [string]$BinDirectory
+          )
+
+          $binPrefix = $BinDirectory.TrimEnd([char]'\') + '\'
+          $all = @(Get-CimInstance -ClassName Win32_Process)
+          $root = @($all | Where-Object ProcessId -eq $RootProcessId)
+          if ($root.Count -ne 1 -or $root[0].Name -ine 'ragent.exe' -or
+              -not ([string]$root[0].ExecutablePath).StartsWith(
+                $binPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase
+              )) {
+            throw 'The SCM PID does not identify the expected ragent executable.'
+          }
+
+          $tree = [System.Collections.ArrayList]::new()
+          [void]$tree.Add($root[0])
+          $seen = [System.Collections.Generic.HashSet[uint32]]::new()
+          [void]$seen.Add($RootProcessId)
+
+          for ($index = 0; $index -lt $tree.Count; $index++) {
+            $parent = $tree[$index]
+            $parentTicks = ([datetime]$parent.CreationDate).ToUniversalTime().Ticks
+            foreach ($child in $all) {
+              if ([uint32]$child.ParentProcessId -ne [uint32]$parent.ProcessId) {
+                continue
+              }
+              if (([datetime]$child.CreationDate).ToUniversalTime().Ticks -lt $parentTicks) {
+                continue
+              }
+
+              $isAgentBinary =
+                -not [string]::IsNullOrWhiteSpace([string]$child.ExecutablePath) -and
+                ([string]$child.ExecutablePath).StartsWith(
+                  $binPrefix,
+                  [System.StringComparison]::OrdinalIgnoreCase
+                )
+              $isConsoleHost = $child.Name -ieq 'conhost.exe'
+              if (-not $isAgentBinary -and -not $isConsoleHost) { continue }
+
+              if ($seen.Add([uint32]$child.ProcessId)) {
+                [void]$tree.Add($child)
+              }
+            }
+          }
+
+          $captured = @(
+            foreach ($process in $tree) {
+              [pscustomobject]@{
+                ProcessId = [uint32]$process.ProcessId
+                ParentProcessId = [uint32]$process.ParentProcessId
+                Name = [string]$process.Name
+                ExecutablePath = [string]$process.ExecutablePath
+                CommandLine = [string]$process.CommandLine
+                CreationTicks = ([datetime]$process.CreationDate).ToUniversalTime().Ticks.ToString(
+                  [System.Globalization.CultureInfo]::InvariantCulture
+                )
+              }
+            }
+          )
+
+          $capturedRoot = @($captured | Where-Object ProcessId -eq $RootProcessId)
+          if ($capturedRoot.Count -ne 1 -or $capturedRoot[0].Name -ine 'ragent.exe') {
+            throw 'The captured process tree does not contain the expected ragent root.'
+          }
+
+          $Ansible.Result = $captured
+          $Ansible.Changed = $false
+        parameters:
+          RootProcessId: "{{ one_c_agent_before_interruption.services[0].process_id }}"
+          BinDirectory: "{{ one_c_bin_dir }}"
+      register: one_c_agent_process_tree
+      when: one_c_migration_required and not ansible_check_mode
+
+    - name: Show the check-mode migration decision
+      ansible.builtin.debug:
+        msg: >-
+          Migration required={{ one_c_migration_required }}. Check mode does not
+          stop services or copy srvinfo data.
+      when: ansible_check_mode
+
+    - name: Safely migrate srvinfo and enforce the final service state
+      when: not ansible_check_mode
+      block:
+        - name: Stop RAS before stopping the 1C agent
+          ansible.windows.win_service:
+            name: "{{ ras_service_name }}"
+            state: stopped
+          when: one_c_migration_required
+
+        - name: Wait for RAS to release its port
+          ansible.windows.win_wait_for:
+            host: "{{ ras_agent_address }}"
+            port: "{{ ras_port }}"
+            state: stopped
+            connect_timeout: 2
+            timeout: 60
+          when: one_c_migration_required
+
+        - name: Stop the 1C agent after RAS
+          ansible.windows.win_service:
+            name: "{{ one_c_agent_service_name }}"
+            state: stopped
+          when: one_c_migration_required
+
+        - name: Gracefully wait then stop only the captured agent process tree
+          ansible.windows.win_powershell:
+            depth: 5
+            error_action: stop
+            script: |
+              param(
+                [string]$CapturedJson,
+                [string]$BinDirectory,
+                [string]$ServiceName,
+                [int]$GraceSeconds = 20,
+                [int]$ForcedWaitSeconds = 10
+              )
+
+              $parsed = $CapturedJson | ConvertFrom-Json
+              $captured = @()
+              for ($index = 0; $index -lt $parsed.Count; $index++) {
+                $captured += $parsed[$index]
+              }
+              $binPrefix = $BinDirectory.TrimEnd([char]'\') + '\'
+              $capturedByPid = @{}
+              foreach ($candidate in $captured) {
+                $capturedByPid[[uint32]$candidate.ProcessId] = $candidate
+              }
+
+              function Get-CapturedDepth($Candidate) {
+                $depth = 0
+                $parentId = [uint32]$Candidate.ParentProcessId
+                $visited = [System.Collections.Generic.HashSet[uint32]]::new()
+                while ($capturedByPid.ContainsKey($parentId) -and
+                       $visited.Add($parentId)) {
+                  $depth++
+                  $parentId = [uint32]$capturedByPid[$parentId].ParentProcessId
+                }
+                return $depth
+              }
+
+              function Get-LiveCapturedProcesses {
+                $matches = @(
+                  foreach ($candidate in $captured) {
+                    $candidatePid = [uint32]$candidate.ProcessId
+                    $live = Get-CimInstance -ClassName Win32_Process `
+                      -Filter "ProcessId = $candidatePid" -ErrorAction Stop
+                    if ($null -eq $live) { continue }
+
+                    $sameIdentity =
+                      $live.Name -ieq [string]$candidate.Name -and
+                      [string]$live.ExecutablePath -ieq [string]$candidate.ExecutablePath -and
+                      [string]$live.CommandLine -ieq [string]$candidate.CommandLine -and
+                      ([datetime]$live.CreationDate).ToUniversalTime().Ticks -eq
+                        [int64]$candidate.CreationTicks
+                    if (-not $sameIdentity) { continue }
+
+                    $isAgentBinary =
+                      -not [string]::IsNullOrWhiteSpace([string]$live.ExecutablePath) -and
+                      ([string]$live.ExecutablePath).StartsWith(
+                        $binPrefix,
+                        [System.StringComparison]::OrdinalIgnoreCase
+                      )
+                    $isCapturedConsoleHost = $live.Name -ieq 'conhost.exe'
+                    if (-not $isAgentBinary -and -not $isCapturedConsoleHost) {
+                      continue
+                    }
+
+                    [pscustomobject]@{
+                      ProcessId = [uint32]$live.ProcessId
+                      Name = [string]$live.Name
+                      ExecutablePath = [string]$live.ExecutablePath
+                      Depth = Get-CapturedDepth $candidate
+                    }
+                  }
+                )
+                return $matches
+              }
+
+              $remaining = @()
+              $graceDeadline = [DateTime]::UtcNow.AddSeconds($GraceSeconds)
+              do {
+                $remaining = @(Get-LiveCapturedProcesses)
+                if ($remaining.Count -eq 0) { break }
+                Start-Sleep -Seconds 1
+              } while ([DateTime]::UtcNow -lt $graceDeadline)
+
+              $terminated = @()
+              if ($remaining.Count -gt 0) {
+                $service = @(Get-CimInstance -ClassName Win32_Service |
+                  Where-Object { $_.Name -ceq $ServiceName })
+                if ($service.Count -ne 1 -or $service[0].State -ne 'Stopped') {
+                  throw "Service '$ServiceName' is not stopped; refusing forced termination."
+                }
+              }
+              foreach ($process in @($remaining | Sort-Object Depth -Descending)) {
+                $candidate = $capturedByPid[[uint32]$process.ProcessId]
+                $live = @(Get-CimInstance -ClassName Win32_Process `
+                  -Filter "ProcessId = $($process.ProcessId)" -ErrorAction Stop)
+                if ($live.Count -ne 1) { continue }
+
+                $sameIdentity =
+                  $live[0].Name -ieq [string]$candidate.Name -and
+                  [uint32]$live[0].ParentProcessId -eq
+                    [uint32]$candidate.ParentProcessId -and
+                  [string]$live[0].ExecutablePath -ieq
+                    [string]$candidate.ExecutablePath -and
+                  [string]$live[0].CommandLine -ceq [string]$candidate.CommandLine -and
+                  ([datetime]$live[0].CreationDate).ToUniversalTime().Ticks -eq
+                    [int64]$candidate.CreationTicks
+                if (-not $sameIdentity) { continue }
+
+                try {
+                  $processObject = Get-Process -Id ([int]$candidate.ProcessId) `
+                    -ErrorAction Stop
+                  $startDelta = [Math]::Abs(
+                    $processObject.StartTime.ToUniversalTime().Ticks -
+                    [int64]$candidate.CreationTicks
+                  )
+                  $expectedName = [IO.Path]::GetFileNameWithoutExtension(
+                    [string]$candidate.Name
+                  )
+                  if ($startDelta -gt [TimeSpan]::TicksPerMillisecond -or
+                      $processObject.ProcessName -ine $expectedName) {
+                    throw "PID $($candidate.ProcessId) changed identity."
+                  }
+                  $processObject.Kill()
+                  [void]$processObject.WaitForExit(10000)
+                  $terminated += [pscustomobject]@{
+                    ProcessId = $candidate.ProcessId
+                    Name = $candidate.Name
+                  }
+                } catch {
+                  if (Get-Process -Id $candidate.ProcessId -ErrorAction SilentlyContinue) {
+                    throw
+                  }
+                }
+              }
+
+              $forcedDeadline = [DateTime]::UtcNow.AddSeconds($ForcedWaitSeconds)
+              do {
+                $remaining = @(Get-LiveCapturedProcesses)
+                if ($remaining.Count -eq 0) { break }
+                Start-Sleep -Seconds 1
+              } while ([DateTime]::UtcNow -lt $forcedDeadline)
+
+              if ($remaining.Count -gt 0) {
+                $details = ($remaining | ForEach-Object {
+                  "$($_.Name):$($_.ProcessId)"
+                }) -join ', '
+                throw "Captured 1C processes are still running: $details"
+              }
+
+              $Ansible.Result = @{
+                CapturedCount = $captured.Count
+                Terminated = $terminated
+                RemainingCount = $remaining.Count
+              }
+              $Ansible.Changed = $terminated.Count -gt 0
+            parameters:
+              CapturedJson: "{{ one_c_agent_process_tree.result | to_json }}"
+              BinDirectory: "{{ one_c_bin_dir }}"
+              ServiceName: "{{ one_c_agent_service_name }}"
+              GraceSeconds: 20
+              ForcedWaitSeconds: 10
+          when: one_c_migration_required
+
+        - name: Wait for the agent ports to close
+          ansible.windows.win_wait_for:
+            host: "{{ ras_agent_address }}"
+            port: "{{ item }}"
+            state: stopped
+            connect_timeout: 2
+            timeout: 60
+          loop:
+            - 1540
+            - 1541
+          when: one_c_migration_required
+
+        - name: Require every source file to be unlocked before copying
+          ansible.windows.win_powershell:
+            depth: 3
+            error_action: stop
+            script: |
+              param([string]$Path)
+
+              $locked = @(
+                foreach ($file in Get-ChildItem -LiteralPath $Path -File -Force -Recurse) {
+                  $stream = $null
+                  try {
+                    $stream = [System.IO.File]::Open(
+                      $file.FullName,
+                      [System.IO.FileMode]::Open,
+                      [System.IO.FileAccess]::Read,
+                      [System.IO.FileShare]::None
+                    )
+                  } catch {
+                    [pscustomobject]@{
+                      Path = $file.FullName
+                      Error = $_.Exception.Message
+                    }
+                  } finally {
+                    if ($null -ne $stream) { $stream.Dispose() }
+                  }
+                }
+              )
+
+              $Ansible.Result = @{ Locked = $locked }
+              $Ansible.Changed = $false
+            parameters:
+              Path: "{{ one_c_install_srvinfo_dir }}"
+          register: one_c_source_lock_probe
+          failed_when: one_c_source_lock_probe.result.Locked | length > 0
+          when: one_c_migration_required
+
+        - name: Remove only an unfinished backup staging directory
+          ansible.windows.win_file:
+            path: "{{ one_c_backup_staging_dir }}"
+            state: absent
+          when: not one_c_backup_marker_stat.exists
+
+        - name: Create the backup staging directory
+          ansible.windows.win_file:
+            path: "{{ one_c_backup_staging_dir }}"
+            state: directory
+          when: not one_c_backup_marker_stat.exists
+
+        - name: Copy the original srvinfo to the one-time backup staging directory
+          ansible.windows.win_command:
+            argv:
+              - robocopy.exe
+              - "{{ one_c_install_srvinfo_dir }}"
+              - "{{ one_c_backup_staging_dir }}"
+              - /E
+              - /COPY:DAT
+              - /DCOPY:DAT
+              - /R:2
+              - /W:1
+              - /XJ
+              - /NFL
+              - /NDL
+              - /NP
+          register: one_c_backup_copy
+          failed_when: one_c_backup_copy.rc | int >= 8
+          changed_when: one_c_backup_copy.rc | int > 0
+          when: not one_c_backup_marker_stat.exists
+
+        - name: Confirm the staged backup contains files
+          ansible.windows.win_find:
+            paths: "{{ one_c_backup_staging_dir }}"
+            recurse: true
+          register: one_c_backup_files
+          when: not one_c_backup_marker_stat.exists
+
+        - name: Require a non-empty staged backup
+          ansible.builtin.assert:
+            that:
+              - one_c_backup_files.matched | int > 0
+            fail_msg: The staged srvinfo backup is empty.
+          when: not one_c_backup_marker_stat.exists
+
+        - name: Store the original cluster ID inside the staged backup
+          ansible.windows.win_copy:
+            content: "{{ one_c_expected_cluster_id }}\r\n"
+            dest: '{{ one_c_backup_staging_dir }}\cluster-id-before-migration.txt'
+            force: false
+          when: not one_c_backup_marker_stat.exists
+
+        - name: Mark the staged backup complete
+          ansible.windows.win_copy:
+            content: "backup completed by Ansible\r\n"
+            dest: '{{ one_c_backup_staging_dir }}\.ansible-copy-complete'
+            force: false
+          when: not one_c_backup_marker_stat.exists
+
+        - name: Protect the immutable backup from the 1C service account
+          ansible.windows.win_powershell:
+            depth: 3
+            error_action: stop
+            script: |
+              param(
+                [string]$Path,
+                [string]$ServiceAccount
+              )
+
+              if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+                throw "Backup directory does not exist: $Path"
+              }
+
+              $sidType = [System.Security.Principal.SecurityIdentifier]
+              $systemSid = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+              $adminsSid = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+              $controllerSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+              $serviceSid = (
+                [System.Security.Principal.NTAccount]::new(
+                  $env:COMPUTERNAME,
+                  $ServiceAccount
+                )
+              ).Translate($sidType)
+
+              if ($serviceSid.Value -eq $controllerSid.Value) {
+                throw 'The service account cannot be the Ansible connection account.'
+              }
+
+              $administrators = Get-LocalGroup -SID $adminsSid -ErrorAction Stop
+              $administratorMemberSids = @(
+                Get-LocalGroupMember -Group $administrators -ErrorAction Stop |
+                  ForEach-Object { $_.SID.Value }
+              )
+              if ($administratorMemberSids -contains $serviceSid.Value) {
+                throw 'The 1C service account is a member of Administrators.'
+              }
+
+              $sections = (
+                [System.Security.AccessControl.AccessControlSections]::Owner -bor
+                [System.Security.AccessControl.AccessControlSections]::Access
+              )
+              $inheritance = (
+                [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+              )
+              $propagation = [System.Security.AccessControl.PropagationFlags]::None
+              $allow = [System.Security.AccessControl.AccessControlType]::Allow
+              $fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
+              $expectedSids = @($systemSid, $adminsSid, $controllerSid)
+              $expectedSidValues = @($expectedSids | ForEach-Object { $_.Value })
+              $changed = $false
+
+              $rootAcl = Get-Acl -LiteralPath $Path
+              $before = $rootAcl.GetSecurityDescriptorSddlForm($sections)
+              $rootAcl.SetAccessRuleProtection($true, $false)
+              foreach ($rule in @($rootAcl.Access)) {
+                [void]$rootAcl.RemoveAccessRuleSpecific($rule)
+              }
+              $rootAcl.SetOwner($adminsSid)
+              foreach ($sid in $expectedSids) {
+                $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+                  $sid,
+                  $fullControl,
+                  $inheritance,
+                  $propagation,
+                  $allow
+                )
+                [void]$rootAcl.AddAccessRule($rule)
+              }
+
+              $after = $rootAcl.GetSecurityDescriptorSddlForm($sections)
+              $refreshChildren = $before -ne $after
+              if ($refreshChildren) {
+                Set-Acl -LiteralPath $Path -AclObject $rootAcl
+                $changed = $true
+              }
+
+              $children = @(
+                Get-ChildItem -LiteralPath $Path -Force -Recurse |
+                  Sort-Object { $_.FullName.Length }
+              )
+              foreach ($child in $children) {
+                $acl = Get-Acl -LiteralPath $child.FullName
+                $before = $acl.GetSecurityDescriptorSddlForm($sections)
+                $acl.SetAccessRuleProtection($false, $false)
+                foreach ($rule in @($acl.Access | Where-Object { -not $_.IsInherited })) {
+                  [void]$acl.RemoveAccessRuleSpecific($rule)
+                }
+                $acl.SetOwner($adminsSid)
+                $after = $acl.GetSecurityDescriptorSddlForm($sections)
+
+                if ($refreshChildren -or $before -ne $after) {
+                  Set-Acl -LiteralPath $child.FullName -AclObject $acl
+                  $changed = $true
+                  $refreshChildren = $true
+                }
+              }
+
+              $violations = 0
+              $items = @(
+                Get-Item -LiteralPath $Path -Force
+                Get-ChildItem -LiteralPath $Path -Force -Recurse
+              )
+              foreach ($item in $items) {
+                $acl = Get-Acl -LiteralPath $item.FullName
+                $ownerSid = (
+                  [System.Security.Principal.NTAccount]$acl.Owner
+                ).Translate($sidType).Value
+                if ($ownerSid -ne $adminsSid.Value) { $violations++ }
+
+                foreach ($rule in @($acl.Access)) {
+                  $ruleSid = $rule.IdentityReference.Translate($sidType).Value
+                  if ($ruleSid -eq $serviceSid.Value -or
+                      $ruleSid -notin $expectedSidValues -or
+                      $rule.AccessControlType -ne $allow -or
+                      $rule.FileSystemRights -ne $fullControl) {
+                    $violations++
+                  }
+                }
+              }
+
+              if ($violations -gt 0) {
+                throw "The immutable backup ACL audit found $violations violations."
+              }
+
+              $Ansible.Result = @{
+                ItemCount = $items.Count
+                Owner = $adminsSid.Value
+                ServiceAccountHasAccess = $false
+                ViolationCount = $violations
+              }
+              $Ansible.Changed = $changed
+            parameters:
+              Path: >-
+                {{
+                  one_c_backup_staging_dir
+                  if not one_c_backup_marker_stat.exists
+                  else one_c_backup_dir
+                }}
+              ServiceAccount: "{{ one_c_user }}"
+
+        - name: Atomically publish the immutable backup
+          ansible.windows.win_powershell:
+            script: |
+              param(
+                [string]$Source,
+                [string]$Destination
+              )
+              if (Test-Path -LiteralPath $Destination) {
+                throw "Destination already exists: $Destination"
+              }
+              if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
+                throw "Staging directory is missing: $Source"
+              }
+              Move-Item -LiteralPath $Source -Destination $Destination
+              $Ansible.Changed = $true
+            parameters:
+              Source: "{{ one_c_backup_staging_dir }}"
+              Destination: "{{ one_c_backup_dir }}"
+          when: not one_c_backup_marker_stat.exists
+
+        - name: Remove only an unfinished srvinfo staging directory
+          ansible.windows.win_file:
+            path: "{{ one_c_srvinfo_staging_dir }}"
+            state: absent
+          when: not one_c_srvinfo_marker_stat.exists
+
+        - name: Create the srvinfo staging directory
+          ansible.windows.win_file:
+            path: "{{ one_c_srvinfo_staging_dir }}"
+            state: directory
+          when: not one_c_srvinfo_marker_stat.exists
+
+        - name: Copy the stopped original state to the new srvinfo staging directory
+          ansible.windows.win_command:
+            argv:
+              - robocopy.exe
+              - "{{ one_c_install_srvinfo_dir }}"
+              - "{{ one_c_srvinfo_staging_dir }}"
+              - /E
+              - /COPY:DAT
+              - /DCOPY:DAT
+              - /R:2
+              - /W:1
+              - /XJ
+              - /NFL
+              - /NDL
+              - /NP
+          register: one_c_srvinfo_copy
+          failed_when: one_c_srvinfo_copy.rc | int >= 8
+          changed_when: one_c_srvinfo_copy.rc | int > 0
+          when: not one_c_srvinfo_marker_stat.exists
+
+        - name: Confirm the staged srvinfo contains files
+          ansible.windows.win_find:
+            paths: "{{ one_c_srvinfo_staging_dir }}"
+            recurse: true
+          register: one_c_srvinfo_files
+          when: not one_c_srvinfo_marker_stat.exists
+
+        - name: Require a non-empty staged srvinfo copy
+          ansible.builtin.assert:
+            that:
+              - one_c_srvinfo_files.matched | int > 0
+            fail_msg: The staged srvinfo directory is empty.
+          when: not one_c_srvinfo_marker_stat.exists
+
+        - name: Mark the staged srvinfo copy complete
+          ansible.windows.win_copy:
+            content: "srvinfo copy completed by Ansible\r\n"
+            dest: '{{ one_c_srvinfo_staging_dir }}\.ansible-copy-complete'
+            force: false
+          when: not one_c_srvinfo_marker_stat.exists
+
+        - name: Atomically publish the new srvinfo directory
+          ansible.windows.win_powershell:
+            script: |
+              param(
+                [string]$Source,
+                [string]$Destination
+              )
+              if (Test-Path -LiteralPath $Destination) {
+                throw "Destination already exists: $Destination"
+              }
+              if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
+                throw "Staging directory is missing: $Source"
+              }
+              Move-Item -LiteralPath $Source -Destination $Destination
+              $Ansible.Changed = $true
+            parameters:
+              Source: "{{ one_c_srvinfo_staging_dir }}"
+              Destination: "{{ one_c_srvinfo_dir }}"
+          when: not one_c_srvinfo_marker_stat.exists
+
+        - name: Keep inherited SYSTEM and administrator ACL entries
+          ansible.windows.win_acl_inheritance:
+            path: "{{ one_c_srvinfo_dir }}"
+            state: present
+
+        - name: Remove an explicit FullControl ACE from the service account
+          ansible.windows.win_acl:
+            path: "{{ one_c_srvinfo_dir }}"
+            user: '.\{{ one_c_user }}'
+            rights: FullControl
+            type: allow
+            state: absent
+            inherit: ContainerInherit,ObjectInherit
+            propagation: None
+
+        - name: Grant inheritable Modify to the service account
+          ansible.windows.win_acl:
+            path: "{{ one_c_srvinfo_dir }}"
+            user: '.\{{ one_c_user }}'
+            rights: Modify
+            type: allow
+            state: present
+            inherit: ContainerInherit,ObjectInherit
+            propagation: None
+
+        - name: Enter the ImagePath update phase
+          ansible.builtin.set_fact:
+            one_c_agent_path_update_attempted: true
+
+        - name: Configure the agent with the preserved command and new -d path
+          ansible.windows.win_service:
+            name: "{{ one_c_agent_service_name }}"
+            path: "{{ one_c_agent_desired_path }}"
+            start_mode: auto
+          register: one_c_agent_path_update
+
+        - name: Start the 1C agent first
+          ansible.windows.win_service:
+            name: "{{ one_c_agent_service_name }}"
+            start_mode: auto
+            state: started
+
+        - name: Wait for the migrated 1C agent
+          ansible.windows.win_wait_for:
+            host: "{{ ras_agent_address }}"
+            port: "{{ ras_agent_port }}"
+            state: started
+            connect_timeout: 2
+            timeout: 60
+
+        - name: Start RAS after the agent
+          ansible.windows.win_service:
+            name: "{{ ras_service_name }}"
+            start_mode: auto
+            state: started
+
+        - name: Wait for RAS after migration
+          ansible.windows.win_wait_for:
+            host: "{{ ras_agent_address }}"
+            port: "{{ ras_port }}"
+            state: started
+            connect_timeout: 2
+            timeout: 60
+
+        - name: Read the cluster ID after migration
+          ansible.windows.win_command:
+            argv:
+              - "{{ rac_executable }}"
+              - cluster
+              - list
+              - "{{ ras_agent_address }}:{{ ras_port }}"
+          register: one_c_clusters_after
+          changed_when: false
+
+        - name: Extract cluster IDs after migration
+          ansible.builtin.set_fact:
+            one_c_cluster_ids_after: >-
+              {{ one_c_clusters_after.stdout
+                 | regex_findall('(?im)^\s*cluster\s*:\s*([0-9A-Fa-f-]{36})\s*$') }}
+
+        - name: Require the original cluster after migration
+          ansible.builtin.assert:
+            that:
+              - one_c_cluster_ids_after | length == 1
+              - (one_c_cluster_ids_after | first | lower) == one_c_expected_cluster_id
+            fail_msg: The cluster ID changed during srvinfo migration.
+
+        - name: Audit the effective directory ACL entries
+          ansible.windows.win_powershell:
+            script: |
+              param(
+                [string]$Path,
+                [string]$ServiceAccount
+              )
+              $acl = Get-Acl -LiteralPath $Path
+              $serviceSid = (New-Object System.Security.Principal.NTAccount(
+                $env:COMPUTERNAME, $ServiceAccount
+              )).Translate([System.Security.Principal.SecurityIdentifier]).Value
+
+              function Get-AllowRulesForSid([string]$Sid) {
+                foreach ($rule in $acl.Access) {
+                  if ($rule.AccessControlType -ne 'Allow') { continue }
+                  try {
+                    $ruleSid = $rule.IdentityReference.Translate(
+                      [System.Security.Principal.SecurityIdentifier]
+                    ).Value
+                  } catch {
+                    continue
+                  }
+                  if ($ruleSid -eq $Sid) { $rule }
+                }
+              }
+
+              function Test-Right($Rules, [System.Security.AccessControl.FileSystemRights]$Right) {
+                foreach ($rule in $Rules) {
+                  if (($rule.FileSystemRights -band $Right) -eq $Right) {
+                    return $true
+                  }
+                }
+                return $false
+              }
+
+              $serviceRules = @(Get-AllowRulesForSid $serviceSid)
+              $systemRules = @(Get-AllowRulesForSid 'S-1-5-18')
+              $adminRules = @(Get-AllowRulesForSid 'S-1-5-32-544')
+
+              [PSCustomObject]@{
+                ServiceModify = Test-Right $serviceRules ([System.Security.AccessControl.FileSystemRights]::Modify)
+                ServiceFullControl = Test-Right $serviceRules ([System.Security.AccessControl.FileSystemRights]::FullControl)
+                SystemFullControl = Test-Right $systemRules ([System.Security.AccessControl.FileSystemRights]::FullControl)
+                AdministratorsFullControl = Test-Right $adminRules ([System.Security.AccessControl.FileSystemRights]::FullControl)
+              }
+              $Ansible.Changed = $false
+            parameters:
+              Path: "{{ one_c_srvinfo_dir }}"
+              ServiceAccount: "{{ one_c_user }}"
+          register: one_c_acl_audit
+          changed_when: false
+
+        - name: Require the intended srvinfo ACL
+          ansible.builtin.assert:
+            that:
+              - one_c_acl_audit.output | length == 1
+              - one_c_acl_audit.output[0].ServiceModify | bool
+              - not (one_c_acl_audit.output[0].ServiceFullControl | bool)
+              - one_c_acl_audit.output[0].SystemFullControl | bool
+              - one_c_acl_audit.output[0].AdministratorsFullControl | bool
+            fail_msg: >-
+              The srvinfo ACL does not preserve administrator/SYSTEM access or
+              gives the service account incorrect rights.
+
+        - name: Mark the migration complete after all verification
+          ansible.windows.win_copy:
+            content: "{{ one_c_expected_cluster_id }}\r\n"
+            dest: "{{ one_c_migration_complete_marker }}"
+            force: false
+
+      rescue:
+        - name: Preserve the original migration failure
+          ansible.builtin.set_fact:
+            one_c_original_failure_task: >-
+              {{ ansible_failed_task.name | default('unknown task') }}
+            one_c_original_failure_message: >-
+              {{ ansible_failed_result.msg
+                 | default(ansible_failed_result.stderr
+                 | default('unknown error')) }}
+
+        - name: Recover services and roll back ImagePath when necessary
+          block:
+            - name: Read the agent service after the failure
+              ansible.windows.win_service_info:
+                name: "{{ one_c_agent_service_name }}"
+              register: one_c_agent_after_failure
+
+            - name: Require the agent service for recovery
+              ansible.builtin.assert:
+                that:
+                  - one_c_agent_after_failure.exists
+                  - one_c_agent_after_failure.services | length == 1
+                fail_msg: The agent service disappeared and cannot be rolled back.
+
+            - name: Decide whether ImagePath must be rolled back
+              ansible.builtin.set_fact:
+                one_c_agent_path_rollback_required: >-
+                  {{
+                    (one_c_agent_path_update_attempted | default(false) | bool)
+                    and
+                    ((one_c_agent_after_failure.services[0].path | trim | lower) !=
+                     (one_c_agent_current_path | trim | lower))
+                  }}
+
+            - name: Stop RAS before ImagePath rollback
+              ansible.windows.win_service:
+                name: "{{ ras_service_name }}"
+                state: stopped
+              when: one_c_agent_path_rollback_required
+
+            - name: Stop the agent before ImagePath rollback
+              ansible.windows.win_service:
+                name: "{{ one_c_agent_service_name }}"
+                state: stopped
+              when: one_c_agent_path_rollback_required
+
+            - name: Restore the previous agent ImagePath
+              ansible.windows.win_service:
+                name: "{{ one_c_agent_service_name }}"
+                path: "{{ one_c_agent_current_path }}"
+                start_mode: auto
+                state: stopped
+              when: one_c_agent_path_rollback_required
+
+            - name: Read the restored agent service
+              ansible.windows.win_service_info:
+                name: "{{ one_c_agent_service_name }}"
+              register: one_c_agent_after_rollback
+
+            - name: Verify the restored ImagePath
+              ansible.builtin.assert:
+                that:
+                  - one_c_agent_after_rollback.exists
+                  - one_c_agent_after_rollback.services | length == 1
+                  - >-
+                    (one_c_agent_after_rollback.services[0].path | trim | lower) ==
+                    (one_c_agent_current_path | trim | lower)
+                fail_msg: The original agent ImagePath was not restored.
+              when: one_c_agent_path_rollback_required
+
+            - name: Start the recovered 1C agent
+              ansible.windows.win_service:
+                name: "{{ one_c_agent_service_name }}"
+                start_mode: auto
+                state: started
+
+            - name: Wait for the recovered 1C agent
+              ansible.windows.win_wait_for:
+                host: "{{ ras_agent_address }}"
+                port: "{{ ras_agent_port }}"
+                state: started
+                connect_timeout: 2
+                timeout: 60
+
+            - name: Start recovered RAS
+              ansible.windows.win_service:
+                name: "{{ ras_service_name }}"
+                start_mode: auto
+                state: started
+
+            - name: Wait for recovered RAS
+              ansible.windows.win_wait_for:
+                host: "{{ ras_agent_address }}"
+                port: "{{ ras_port }}"
+                state: started
+                connect_timeout: 2
+                timeout: 60
+
+            - name: Read clusters after automatic recovery
+              ansible.windows.win_command:
+                argv:
+                  - "{{ rac_executable }}"
+                  - cluster
+                  - list
+                  - "{{ ras_agent_address }}:{{ ras_port }}"
+              register: one_c_rollback_clusters
+              changed_when: false
+              retries: 12
+              delay: 5
+              until:
+                - one_c_rollback_clusters.rc == 0
+                - >-
+                  (one_c_rollback_clusters.stdout
+                   | regex_findall('(?im)^\s*cluster\s*:\s*([0-9A-Fa-f-]{36})\s*$')
+                   | length) == 1
+
+            - name: Verify the original cluster after automatic recovery
+              ansible.builtin.assert:
+                that:
+                  - >-
+                    (one_c_rollback_clusters.stdout
+                     | regex_findall('(?im)^\s*cluster\s*:\s*([0-9A-Fa-f-]{36})\s*$')
+                     | first | lower) == one_c_expected_cluster_id
+                fail_msg: >-
+                  Services recovered, but the original cluster ID was not restored.
+
+          rescue:
+            - name: Report a failed automatic rollback
+              ansible.builtin.fail:
+                msg: >-
+                  Migration originally failed at {{ one_c_original_failure_task }}:
+                  {{ one_c_original_failure_message }}. Automatic recovery then
+                  failed at {{ ansible_failed_task.name | default('unknown recovery task') }}:
+                  {{ ansible_failed_result.msg | default('unknown recovery error') }}.
+
+        - name: Preserve the original failure after successful recovery
+          ansible.builtin.fail:
+            msg: >-
+              Migration failed at {{ one_c_original_failure_task }}:
+              {{ one_c_original_failure_message }}. Services were recovered and
+              ImagePath rollback performed={{ one_c_agent_path_rollback_required }}.
+
+    - name: Report the final migration state
+      ansible.builtin.debug:
+        msg: >-
+          srvinfo={{ one_c_srvinfo_dir }}; immutable backup={{ one_c_backup_dir }};
+          cluster={{ one_c_expected_cluster_id }}.
+      when: not ansible_check_mode

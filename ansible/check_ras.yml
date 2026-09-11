@@ -1,9 +1,176 @@
 ---
-- name: Configure and verify 1C RAS
+- name: Verify the migrated 1C agent and RAS
   hosts: windows_hosts
   gather_facts: false
 
   tasks:
+    - name: Read the 1C agent service
+      ansible.windows.win_service_info:
+        name: "{{ one_c_agent_service_name }}"
+      register: one_c_agent
+
+    - name: Read the RAS service
+      ansible.windows.win_service_info:
+        name: "{{ ras_service_name }}"
+      register: one_c_ras
+
+    - name: Require the agent and RAS services
+      ansible.builtin.assert:
+        that:
+          - one_c_agent.exists
+          - one_c_agent.services | length == 1
+          - one_c_ras.exists
+          - one_c_ras.services | length == 1
+        fail_msg: The 1C agent or RAS service is missing.
+
+    - name: Build the expected agent data-directory pattern
+      ansible.builtin.set_fact:
+        one_c_agent_data_pattern: >-
+          (?i)(?:^|\s)[-/]d(?:\s+|=)"?{{ one_c_srvinfo_dir | regex_escape }}"?(?:\s|$)
+
+    - name: Inspect the migrated directory and immutable cluster ID
+      ansible.windows.win_stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ one_c_srvinfo_dir }}"
+        - "{{ one_c_srvinfo_copy_marker }}"
+        - "{{ one_c_original_cluster_id_file }}"
+        - "{{ one_c_migration_complete_marker }}"
+      register: one_c_check_paths
+
+    - name: Verify the migrated service and filesystem state
+      ansible.builtin.assert:
+        that:
+          - one_c_agent.services[0].state == 'started'
+          - one_c_agent.services[0].start_mode == 'auto'
+          - >-
+            (one_c_agent.services[0].path
+            | regex_search(one_c_agent_data_pattern)) is not none
+          - one_c_ras.services[0].state == 'started'
+          - one_c_ras.services[0].start_mode == 'auto'
+          - one_c_check_paths.results[0].stat.exists
+          - one_c_check_paths.results[0].stat.isdir | default(false)
+          - one_c_check_paths.results[1].stat.exists
+          - one_c_check_paths.results[1].stat.isreg | default(false)
+          - one_c_check_paths.results[2].stat.exists
+          - one_c_check_paths.results[2].stat.isreg | default(false)
+          - one_c_check_paths.results[3].stat.exists
+          - one_c_check_paths.results[3].stat.isreg | default(false)
+        fail_msg: >-
+          The services, the agent -d path, srvinfo directory, or migration
+          markers are invalid.
+
+    - name: Read the original cluster ID from the immutable backup
+      ansible.windows.slurp:
+        src: "{{ one_c_original_cluster_id_file }}"
+      register: one_c_original_cluster_id_raw
+
+    - name: Decode the original cluster ID
+      ansible.builtin.set_fact:
+        one_c_original_cluster_id: >-
+          {{ one_c_original_cluster_id_raw.content | b64decode | trim | lower }}
+
+    - name: Validate the stored original cluster ID
+      ansible.builtin.assert:
+        that:
+          - one_c_original_cluster_id is match('^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$')
+        fail_msg: The immutable original cluster ID is invalid.
+
+    - name: Audit immutable backup ownership and ACLs
+      ansible.windows.win_powershell:
+        depth: 3
+        error_action: stop
+        script: |
+          param(
+            [string]$Path,
+            [string]$ServiceAccount
+          )
+
+          $sidType = [System.Security.Principal.SecurityIdentifier]
+          $adminsSid = 'S-1-5-32-544'
+          $systemSid = 'S-1-5-18'
+          $controllerSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $serviceSid = (
+            [System.Security.Principal.NTAccount]::new(
+              $env:COMPUTERNAME,
+              $ServiceAccount
+            )
+          ).Translate($sidType).Value
+          $allowedSids = @($adminsSid, $systemSid, $controllerSid)
+
+          $serviceAceCount = 0
+          $unexpectedAceCount = 0
+          $unexpectedOwnerCount = 0
+          $missingAdminFullControlCount = 0
+          $missingSystemFullControlCount = 0
+          $items = @(
+            Get-Item -LiteralPath $Path -Force
+            Get-ChildItem -LiteralPath $Path -Force -Recurse
+          )
+
+          foreach ($item in $items) {
+            $acl = Get-Acl -LiteralPath $item.FullName
+            $ownerSid = (
+              [System.Security.Principal.NTAccount]$acl.Owner
+            ).Translate($sidType).Value
+            if ($ownerSid -ne $adminsSid) { $unexpectedOwnerCount++ }
+
+            $adminFullControl = $false
+            $systemFullControl = $false
+            foreach ($rule in @($acl.Access)) {
+              $ruleSid = $rule.IdentityReference.Translate($sidType).Value
+              if ($ruleSid -eq $serviceSid) { $serviceAceCount++ }
+              if ($ruleSid -notin $allowedSids) { $unexpectedAceCount++ }
+
+              $hasFullControl =
+                $rule.AccessControlType -eq 'Allow' -and
+                (($rule.FileSystemRights -band
+                  [System.Security.AccessControl.FileSystemRights]::FullControl) -eq
+                 [System.Security.AccessControl.FileSystemRights]::FullControl)
+              if ($ruleSid -eq $adminsSid -and $hasFullControl) {
+                $adminFullControl = $true
+              }
+              if ($ruleSid -eq $systemSid -and $hasFullControl) {
+                $systemFullControl = $true
+              }
+            }
+
+            if (-not $adminFullControl) { $missingAdminFullControlCount++ }
+            if (-not $systemFullControl) { $missingSystemFullControlCount++ }
+          }
+
+          $rootAcl = Get-Acl -LiteralPath $Path
+          $Ansible.Result = @{
+            ItemCount = $items.Count
+            RootInheritanceProtected = [bool]$rootAcl.AreAccessRulesProtected
+            ServiceAceCount = $serviceAceCount
+            UnexpectedAceCount = $unexpectedAceCount
+            UnexpectedOwnerCount = $unexpectedOwnerCount
+            MissingAdminFullControlCount = $missingAdminFullControlCount
+            MissingSystemFullControlCount = $missingSystemFullControlCount
+          }
+          $Ansible.Changed = $false
+        parameters:
+          Path: "{{ one_c_backup_dir }}"
+          ServiceAccount: "{{ one_c_user }}"
+      register: one_c_backup_acl_audit
+      changed_when: false
+
+    - name: Require an immutable backup ACL
+      ansible.builtin.assert:
+        that:
+          - one_c_backup_acl_audit.result.RootInheritanceProtected | bool
+          - one_c_backup_acl_audit.result.ServiceAceCount | int == 0
+          - one_c_backup_acl_audit.result.UnexpectedAceCount | int == 0
+          - one_c_backup_acl_audit.result.UnexpectedOwnerCount | int == 0
+          - one_c_backup_acl_audit.result.MissingAdminFullControlCount | int == 0
+          - one_c_backup_acl_audit.result.MissingSystemFullControlCount | int == 0
+        fail_msg: >-
+          The backup is not protected from the 1C service account or no longer
+          preserves administrator/SYSTEM control.
+
+    - name: Refresh the WinRM connection after the recursive ACL audit
+      ansible.builtin.meta: reset_connection
 
     - name: Query the cluster list through RAS
       ansible.windows.win_command:
@@ -16,15 +183,35 @@
       changed_when: false
       check_mode: false
 
-    - name: Extract cluster ID
+    - name: Collect current cluster records
+      ansible.builtin.set_fact:
+        current_cluster_records: >-
+          {{ rac_clusters.stdout_lines
+             | select('match', '^\s*cluster\s*:') | list }}
+
+    - name: Assert exactly one cluster exists before extracting its ID
+      ansible.builtin.assert:
+        that:
+          - current_cluster_records | length == 1
+        fail_msg: >-
+          Expected exactly one cluster, found
+          {{ current_cluster_records | length }}.
+
+    - name: Extract the current cluster ID
       ansible.builtin.set_fact:
         cluster_id: >-
-          {{
-            (rac_clusters.stdout_lines
-            | select('match', '^\s*cluster\s*:')
-            | first
-            | regex_replace('^\s*cluster\s*:\s*', ''))
-          }}
+          {{ current_cluster_records[0]
+             | regex_replace('^\s*cluster\s*:\s*', '')
+             | trim | lower }}
+
+    - name: Verify the cluster ID was preserved
+      ansible.builtin.assert:
+        that:
+          - cluster_id == one_c_original_cluster_id
+        fail_msg: >-
+          Cluster ID changed during srvinfo migration: expected
+          {{ one_c_original_cluster_id }}, got {{ cluster_id }}.
+        success_msg: The original cluster ID was preserved.
 
     - name: Query the cluster info through RAS
       ansible.windows.win_command:
@@ -74,47 +261,27 @@
       changed_when: false
       check_mode: false
 
-    - name: Assert exactly one cluster exists
-      ansible.builtin.assert:
-        that:
-          - rac_clusters.stdout_lines | select('match', '^\s*cluster\s*:') | list | length == 1
-        fail_msg: "Ожидается ровно один кластер, найдено: {{ rac_clusters.stdout_lines | select('match', '^\\s*cluster\\s*:') | list | length }}"
-        success_msg: "Кластер один — OK"
-
     - name: Assert at least one working server exists
       ansible.builtin.assert:
         that:
-          - rac_server.stdout_lines | select('match', '^\s*server\s*:') | list | length >= 1
-        fail_msg: "Рабочих серверов не найдено"
-        success_msg: "Найдено серверов: {{ rac_server.stdout_lines | select('match', '^\\s*server\\s*:') | list | length }}"
+          - >-
+            rac_server.stdout_lines
+            | select('match', '^\s*server\s*:') | list | length >= 1
+        fail_msg: No 1C working server was found.
 
     - name: Assert at least one working process exists
       ansible.builtin.assert:
         that:
-          - rac_process.stdout_lines | select('match', '^\s*process\s*:') | list | length >= 1
-        fail_msg: "Рабочих процессов (rphost) не найдено"
-        success_msg: "Найдено процессов: {{ rac_process.stdout_lines | select('match', '^\\s*process\\s*:') | list | length }}"
+          - >-
+            rac_process.stdout_lines
+            | select('match', '^\s*process\s*:') | list | length >= 1
+        fail_msg: No 1C working process was found.
 
     - name: Show cluster summary
       ansible.builtin.debug:
         msg:
-          - "=== Кластер 1С ==="
-          - "ID:       {{ cluster_id }}"
-          - "Имя:      {{ rac_cluster_info.stdout_lines | select('match', '^\\s*name\\s*:') | first | regex_replace('^\\s*name\\s*:\\s*', '') }}"
-          - "Хост:     {{ rac_cluster_info.stdout_lines | select('match', '^\\s*host\\s*:') | first | regex_replace('^\\s*host\\s*:\\s*', '') }}"
-          - "Порт:     {{ rac_cluster_info.stdout_lines | select('match', '^\\s*port\\s*:') | first | regex_replace('^\\s*port\\s*:\\s*', '') }}"
-          - "Серверов: {{ rac_server.stdout_lines | select('match', '^\\s*server\\s*:') | list | length }}"
-          - "Процессов: {{ rac_process.stdout_lines | select('match', '^\\s*process\\s*:') | list | length }}"
-          - "Сессий:   {{ rac_session.stdout_lines | select('match', '^\\s*session\\s*:') | list | length }}"
-
-    - name: Show server details
-      ansible.builtin.debug:
-        msg: >-
-          {{ item | regex_replace('^\s*(\S+)\s*:\s*(.*)$', '\1 = \2') }}
-      loop: "{{ rac_server.stdout_lines | select('match', '^\\s*(server|host|port|using|alive)\\s*:') | list }}"
-
-    - name: Show session details
-      ansible.builtin.debug:
-        msg: >-
-          {{ item | regex_replace('^\s*(\S+)\s*:\s*(.*)$', '\1 = \2') }}
-      loop: "{{ rac_session.stdout_lines | select('match', '^\\s*(session|user|app|infobase|host)\\s*:') | list }}"
+          - "cluster_id={{ cluster_id }}"
+          - "srvinfo={{ one_c_srvinfo_dir }}"
+          - "servers={{ rac_server.stdout_lines | select('match', '^\\s*server\\s*:') | list | length }}"
+          - "processes={{ rac_process.stdout_lines | select('match', '^\\s*process\\s*:') | list | length }}"
+          - "sessions={{ rac_session.stdout_lines | select('match', '^\\s*session\\s*:') | list | length }}"
