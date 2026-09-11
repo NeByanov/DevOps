@@ -25,6 +25,17 @@
           RAS or RAC was not found in the configured 1C {{ one_c_version }}
           installation directory.
 
+    - name: Set correct service credentials and start agent
+      ansible.windows.win_service:
+        name: "{{ one_c_agent_service_name }}"
+        username: ".\\{{ one_c_user }}"
+        password: "{{ one_c_service_password }}"
+        update_password: on_create
+        start_mode: auto
+        state: started
+      no_log: false
+
+
     - name: Read 1C agent service
       ansible.windows.win_service_info:
         name: "{{ one_c_agent_service_name }}"
