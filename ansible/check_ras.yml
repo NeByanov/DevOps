@@ -4,6 +4,11 @@
   gather_facts: false
 
   tasks:
+
+    # ── Запросы к RAS ──────────────────────────────────────────
+    # check_mode: false — команды только читают данные, не меняют состояние,
+    # поэтому их можно безопасно выполнять даже в --check
+
     - name: Query the cluster list through RAS
       ansible.windows.win_command:
         argv:
@@ -13,6 +18,7 @@
           - "{{ ras_agent_address }}:{{ ras_port }}"
       register: rac_clusters
       changed_when: false
+      check_mode: false
 
     - name: Extract cluster ID
       ansible.builtin.set_fact:
@@ -23,7 +29,6 @@
             | first
             | regex_replace('^\s*cluster\s*:\s*', '')
           }}
-      changed_when: false
 
     - name: Query the server list through RAS
       ansible.windows.win_command:
@@ -35,6 +40,7 @@
           - "--cluster={{ cluster_id }}"
       register: rac_server
       changed_when: false
+      check_mode: false
 
     - name: Query the process list through RAS
       ansible.windows.win_command:
@@ -46,6 +52,7 @@
           - "--cluster={{ cluster_id }}"
       register: rac_process
       changed_when: false
+      check_mode: false
 
     - name: Query the session list through RAS
       ansible.windows.win_command:
@@ -57,20 +64,50 @@
           - "--cluster={{ cluster_id }}"
       register: rac_session
       changed_when: false
+      check_mode: false
 
+    # ── Assertions ─────────────────────────────────────────────
 
-    - name: Show clusters
+    - name: Assert exactly one cluster exists
+      ansible.builtin.assert:
+        that:
+          - rac_clusters.stdout_lines | select('match', '^\s*cluster\s*:') | list | length == 1
+        fail_msg: "Ожидается ровно один кластер, найдено: {{ rac_clusters.stdout_lines | select('match', '^\\s*cluster\\s*:') | list | length }}"
+        success_msg: "Кластер один — OK"
+
+    - name: Assert at least one working server exists
+      ansible.builtin.assert:
+        that:
+          - rac_server.stdout_lines | select('match', '^\s*server\s*:') | list | length >= 1
+        fail_msg: "Рабочих серверов не найдено"
+        success_msg: "Найдено серверов: {{ rac_server.stdout_lines | select('match', '^\\s*server\\s*:') | list | length }}"
+
+    - name: Assert at least one working process exists
+      ansible.builtin.assert:
+        that:
+          - rac_process.stdout_lines | select('match', '^\s*process\s*:') | list | length >= 1
+        fail_msg: "Рабочих процессов (rphost) не найдено"
+        success_msg: "Найдено процессов: {{ rac_process.stdout_lines | select('match', '^\\s*process\\s*:') | list | length }}"
+
+    # ── Краткая сводка ─────────────────────────────────────────
+
+    - name: Show cluster summary
       ansible.builtin.debug:
-        var: rac_clusters.stdout_lines
+        msg:
+          - "=== Кластер 1С ==="
+          - "ID:      {{ cluster_id }}"
+          - "Серверов: {{ rac_server.stdout_lines | select('match', '^\\s*server\\s*:') | list | length }}"
+          - "Процессов: {{ rac_process.stdout_lines | select('match', '^\\s*process\\s*:') | list | length }}"
+          - "Сессий:   {{ rac_session.stdout_lines | select('match', '^\\s*session\\s*:') | list | length }}"
 
-    - name: Show servers
+    - name: Show server details
       ansible.builtin.debug:
-        var: rac_server.stdout_lines
+        msg: >-
+          {{ item | regex_replace('^\s*(\S+)\s*:\s*(.*)$', '\1 = \2') }}
+      loop: "{{ rac_server.stdout_lines | select('match', '^\\s*(server|host|port|using|alive)\\s*:') | list }}"
 
-    - name: Show processes
+    - name: Show session details
       ansible.builtin.debug:
-        var: rac_process.stdout_lines
-
-    - name: Show sessions
-      ansible.builtin.debug:
-        var: rac_session.stdout_lines
+        msg: >-
+          {{ item | regex_replace('^\s*(\S+)\s*:\s*(.*)$', '\1 = \2') }}
+      loop: "{{ rac_session.stdout_lines | select('match', '^\\s*(session|user|app|infobase|host)\\s*:') | list }}"
