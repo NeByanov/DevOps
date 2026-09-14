@@ -33,8 +33,10 @@
         update_password: on_create
         start_mode: auto
         state: started
+        load_order_group: OneCAgent
+        failure_actions:
+          - type: restart
       no_log: false
-
 
     - name: Read 1C agent service
       ansible.windows.win_service_info:
@@ -176,6 +178,8 @@
                 Select-Object TimeCreated, Id, Message |
                 ConvertTo-Json
           register: app_errors
+          check_mode: false
+          changed_when: false
 
         - name: Show errors
           ansible.builtin.debug:
