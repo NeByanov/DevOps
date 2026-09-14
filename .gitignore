@@ -15,6 +15,7 @@
 /DevOps/
 kubeconfig*
 .ssh
+1c_role.sql
 # State files
 *.tfstate
 *.tfstate.*
