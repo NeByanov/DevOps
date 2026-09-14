@@ -120,7 +120,6 @@
       loop: "{{ ras_blocked_agent_ports }}"
 
     - name: Verify the configured RAS service
-      when: not ansible_check_mode
       block:
         - name: Wait for the local RAS listener
           ansible.windows.win_wait_for:
@@ -129,6 +128,7 @@
             state: started
             connect_timeout: 2
             timeout: 60
+            check_mode: false
 
         - name: Query the cluster list through RAS
           ansible.windows.win_command:
@@ -142,6 +142,7 @@
           failed_when: >-
             rac_clusters.rc != 0 or
             (rac_clusters.stdout | trim | length) == 0
+          check_mode: false
 
         - name: Verify RAS is reachable from the Host-Only controller
           ansible.builtin.wait_for:
@@ -151,6 +152,7 @@
             connect_timeout: 2
             timeout: 15
           delegate_to: localhost
+          check_mode: false
 
         - name: Verify 1C agent ports are not exposed to the controller
           ansible.builtin.wait_for:
@@ -161,6 +163,7 @@
             timeout: 5
           loop: "{{ ras_blocked_agent_ports }}"
           delegate_to: localhost
+          check_mode: false
 
         - name: Report successful RAS verification
           ansible.builtin.debug:
