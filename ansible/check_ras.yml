@@ -153,8 +153,9 @@
         parameters:
           Path: "{{ one_c_backup_dir }}"
           ServiceAccount: "{{ one_c_user }}"
-      register: one_c_backup_acl_audit
+      check_mode: false
       changed_when: false
+      register: one_c_backup_acl_audit
 
     - name: Require an immutable backup ACL
       ansible.builtin.assert:
