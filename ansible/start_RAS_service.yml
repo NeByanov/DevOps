@@ -76,8 +76,13 @@
           - "{{ one_c_agent_service_name }}"
         dependency_action: add
         state: started
+        load_order_group: RasAgent
+        failure_actions:
+          - type: restart
+            delay_ms: 10000
       no_log: true
       notify: Restart RAS after configuration change
+
 
     - name: Apply a pending RAS restart before verification
       ansible.builtin.meta: flush_handlers
@@ -162,8 +167,25 @@
               a cluster list, and ports {{ ras_blocked_agent_ports | join(', ') }}
               are not reachable from the controller.
 
+
+        - name: Get last 10 errors from Application log
+          ansible.windows.win_powershell:
+            script: |
+              Get-WinEvent -LogName Application -MaxEvents 10 |
+                Where-Object {$_.LevelDisplayName -eq 'Error'} |
+                Select-Object TimeCreated, Id, Message |
+                ConvertTo-Json
+          register: app_errors
+
+        - name: Show errors
+          ansible.builtin.debug:
+            var: app_errors.result
+
   handlers:
     - name: Restart RAS after configuration change
       ansible.windows.win_service:
         name: "{{ ras_service_name }}"
         state: restarted
+
+
+
