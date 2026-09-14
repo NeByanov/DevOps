@@ -8,7 +8,7 @@ services:
     volumes:
       - postgres_data_for_1c:/var/lib/postgresql/data
       - ./1c_role.sql:/docker-entrypoint-initdb.d/1c_role.sql:ro
-      - ./pg_hba.conf:/pg_hba_custom/pg_hba.conf:ro
+      - ./pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
