@@ -1,0 +1,365 @@
+---
+- name: Register 1C server infobase in cluster
+  hosts: windows_hosts
+  gather_facts: false
+
+  tasks:
+    - name: Query cluster IDs through RAC
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+          $endpoint = "{{ ras_agent_address }}:{{ ras_port }}"
+          $output = & "{{ rac_executable }}" cluster list $endpoint 2>&1
+          $exitCode = $LASTEXITCODE
+
+          if ($exitCode -ne 0) {
+            throw "rac cluster list failed with exit code $exitCode`: $($output -join [Environment]::NewLine)"
+          }
+
+          [string[]]$clusterIds = @(
+            foreach ($lineObject in $output) {
+              $line = [string]$lineObject
+              if ($line -match '^\s*cluster\s*:\s*(\S+)\s*$') {
+                $Matches[1].Trim().ToLowerInvariant()
+              }
+            }
+          )
+
+          $Ansible.Result = @{
+            cluster_ids = [string[]]$clusterIds
+          }
+      register: rac_cluster_result
+      changed_when: false
+      check_mode: false
+
+    - name: Require exactly one 1C cluster
+      ansible.builtin.assert:
+        that:
+          - rac_cluster_result.result.cluster_ids | default([], true) | length == 1
+        fail_msg: >-
+          Expected exactly one 1C cluster from RAC, found
+          {{ rac_cluster_result.result.cluster_ids | default([], true) | length }}.
+        quiet: true
+
+    - name: Store the current cluster ID
+      ansible.builtin.set_fact:
+        one_c_cluster_id: "{{ rac_cluster_result.result.cluster_ids | first }}"
+
+    - name: Query the current infobase list through RAC
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+
+          function ConvertFrom-RacRecords {
+            param([object[]]$Lines)
+
+            $records = [System.Collections.Generic.List[object]]::new()
+            $unparsed = [System.Collections.Generic.List[string]]::new()
+            $current = [ordered]@{}
+
+            foreach ($lineObject in $Lines) {
+              $line = [string]$lineObject
+
+              if ([string]::IsNullOrWhiteSpace($line)) {
+                if ($current.Count -gt 0) {
+                  $records.Add([PSCustomObject]$current)
+                  $current = [ordered]@{}
+                }
+                continue
+              }
+
+              if ($line -match '^\s*([^:]+?)\s*:\s*(.*)$') {
+                $key = $Matches[1].Trim()
+                $value = $Matches[2].Trim().Trim([char]34)
+                $current[$key] = $value
+              }
+              else {
+                $unparsed.Add($line)
+              }
+            }
+
+            if ($current.Count -gt 0) {
+              $records.Add([PSCustomObject]$current)
+            }
+
+            return [PSCustomObject]@{
+              Records = [object[]]$records.ToArray()
+              Unparsed = [string[]]$unparsed.ToArray()
+            }
+          }
+
+          $endpoint = "{{ ras_agent_address }}:{{ ras_port }}"
+          $output = & "{{ rac_executable }}" infobase summary list `
+            $endpoint `
+            "--cluster={{ one_c_cluster_id }}" 2>&1
+          $exitCode = $LASTEXITCODE
+
+          if ($exitCode -ne 0) {
+            throw "rac infobase summary list failed with exit code $exitCode`: $($output -join [Environment]::NewLine)"
+          }
+
+          $parsed = ConvertFrom-RacRecords -Lines @($output)
+          if ($parsed.Unparsed.Count -gt 0) {
+            throw "rac infobase summary list returned unparsed output: $($parsed.Unparsed -join [Environment]::NewLine)"
+          }
+
+          $Ansible.Result = @{
+            records = [object[]]$parsed.Records
+          }
+      register: rac_infobase_list
+      changed_when: false
+      check_mode: false
+
+    - name: Store current infobase names and counts
+      ansible.builtin.set_fact:
+        one_c_current_infobase_names: >-
+          {{ rac_infobase_list.result.records | default([], true)
+             | selectattr('name', 'defined')
+             | map(attribute='name') | list }}
+        one_c_current_infobase_count: >-
+          {{ rac_infobase_list.result.records | default([], true) | length }}
+
+    - name: Count matching infobases case-insensitively
+      ansible.builtin.set_fact:
+        one_c_infobase_match_count: >-
+          {{ one_c_current_infobase_names
+             | map('lower')
+             | select('equalto', one_c_infobase_name | lower)
+             | list | length }}
+
+    - name: Refuse ambiguous or unexpected infobase state
+      ansible.builtin.assert:
+        that:
+          - one_c_current_infobase_count | int <= 1
+          - >-
+            (one_c_current_infobase_count | int == 0) or
+            (one_c_infobase_match_count | int == 1)
+        fail_msg: >-
+          Registration was stopped before any change. Expected an empty cluster
+          or exactly one infobase named {{ one_c_infobase_name }}, but RAC returned
+          {{ one_c_current_infobase_count }} infobase(s):
+          {{ one_c_current_infobase_names | join(', ') }}.
+        quiet: true
+
+    - name: Validate non-secret infobase parameters
+      ansible.builtin.assert:
+        that:
+          - one_c_infobase_name == 'one_c_lab'
+          - one_c_dbms == 'PostgreSQL'
+          - one_c_db_host == '192.168.56.101'
+          - one_c_db_port | int == 5432
+          - one_c_db_name == 'OneC'
+          - one_c_db_user == 'one_c_db_user'
+          - one_c_infobase_locale | length > 0
+        fail_msg: The non-secret 1C infobase parameters do not match the lab specification.
+        quiet: true
+
+    - name: Require the vaulted PostgreSQL role password
+      ansible.builtin.assert:
+        that:
+          - one_c_db_password is defined
+          - one_c_db_password | string | length > 0
+        quiet: true
+      no_log: true
+
+    - name: Show the registration that check mode would perform
+      ansible.builtin.debug:
+        msg: >-
+          Would register {{ one_c_infobase_name }} in cluster
+          {{ one_c_cluster_id }} using the existing PostgreSQL database
+          {{ one_c_db_name }} on {{ one_c_db_host }}:{{ one_c_db_port }}.
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - one_c_current_infobase_count | int == 0
+
+    - name: Register the existing PostgreSQL infobase in the 1C cluster
+      ansible.windows.win_command:
+        argv:
+          - "{{ rac_executable }}"
+          - infobase
+          - create
+          - "{{ ras_agent_address }}:{{ ras_port }}"
+          - "--cluster={{ one_c_cluster_id }}"
+          - "--name={{ one_c_infobase_name }}"
+          - "--dbms={{ one_c_dbms }}"
+          - "--db-server={{ one_c_db_host }} port={{ one_c_db_port }}"
+          - "--db-name={{ one_c_db_name }}"
+          - "--db-user={{ one_c_db_user }}"
+          - "--db-pwd={{ one_c_db_password }}"
+          - "--locale={{ one_c_infobase_locale }}"
+      no_log: true
+      when:
+        - not ansible_check_mode
+        - one_c_current_infobase_count | int == 0
+
+    - name: Verify the registered infobase through RAC
+      when: >-
+        (not ansible_check_mode) or
+        (one_c_infobase_match_count | int == 1)
+      block:
+        - name: Query the final infobase list through RAC
+          ansible.windows.win_powershell:
+            script: |
+              $Ansible.Changed = $false
+
+              function ConvertFrom-RacRecords {
+                param([object[]]$Lines)
+
+                $records = [System.Collections.Generic.List[object]]::new()
+                $unparsed = [System.Collections.Generic.List[string]]::new()
+                $current = [ordered]@{}
+
+                foreach ($lineObject in $Lines) {
+                  $line = [string]$lineObject
+
+                  if ([string]::IsNullOrWhiteSpace($line)) {
+                    if ($current.Count -gt 0) {
+                      $records.Add([PSCustomObject]$current)
+                      $current = [ordered]@{}
+                    }
+                    continue
+                  }
+
+                  if ($line -match '^\s*([^:]+?)\s*:\s*(.*)$') {
+                    $key = $Matches[1].Trim()
+                    $value = $Matches[2].Trim().Trim([char]34)
+                    $current[$key] = $value
+                  }
+                  else {
+                    $unparsed.Add($line)
+                  }
+                }
+
+                if ($current.Count -gt 0) {
+                  $records.Add([PSCustomObject]$current)
+                }
+
+                return [PSCustomObject]@{
+                  Records = [object[]]$records.ToArray()
+                  Unparsed = [string[]]$unparsed.ToArray()
+                }
+              }
+
+              $endpoint = "{{ ras_agent_address }}:{{ ras_port }}"
+              $output = & "{{ rac_executable }}" infobase summary list `
+                $endpoint `
+                "--cluster={{ one_c_cluster_id }}" 2>&1
+              $exitCode = $LASTEXITCODE
+
+              if ($exitCode -ne 0) {
+                throw "rac infobase summary list failed with exit code $exitCode`: $($output -join [Environment]::NewLine)"
+              }
+
+              $parsed = ConvertFrom-RacRecords -Lines @($output)
+              if ($parsed.Unparsed.Count -gt 0) {
+                throw "rac infobase summary list returned unparsed output: $($parsed.Unparsed -join [Environment]::NewLine)"
+              }
+
+              $Ansible.Result = @{
+                records = [object[]]$parsed.Records
+              }
+          register: rac_final_infobase_list
+          changed_when: false
+          check_mode: false
+
+        - name: Require exactly one correctly named infobase
+          ansible.builtin.assert:
+            that:
+              - rac_final_infobase_list.result.records | default([], true) | length == 1
+              - rac_final_infobase_list.result.records[0].infobase is defined
+              - rac_final_infobase_list.result.records[0].name is defined
+              - rac_final_infobase_list.result.records[0].name == one_c_infobase_name
+            fail_msg: >-
+              Expected exactly one infobase named {{ one_c_infobase_name }}.
+            quiet: true
+
+        - name: Store the registered infobase ID
+          ansible.builtin.set_fact:
+            one_c_infobase_id: "{{ rac_final_infobase_list.result.records[0].infobase }}"
+
+        - name: Query safe infobase details through RAC
+          ansible.windows.win_powershell:
+            script: |
+              $Ansible.Changed = $false
+              $endpoint = "{{ ras_agent_address }}:{{ ras_port }}"
+              $output = & "{{ rac_executable }}" infobase info `
+                $endpoint `
+                "--cluster={{ one_c_cluster_id }}" `
+                "--infobase={{ one_c_infobase_id }}" 2>&1
+              $exitCode = $LASTEXITCODE
+
+              if ($exitCode -ne 0) {
+                throw "rac infobase info failed with exit code $exitCode`: $($output -join [Environment]::NewLine)"
+              }
+
+              $allowedKeys = @(
+                'infobase',
+                'name',
+                'dbms',
+                'db-server',
+                'db-name',
+                'db-user'
+              )
+              $safe = [ordered]@{}
+
+              foreach ($lineObject in $output) {
+                $line = [string]$lineObject
+                if ($line -match '^\s*([^:]+?)\s*:\s*(.*)$') {
+                  $key = $Matches[1].Trim()
+                  if ($allowedKeys -contains $key) {
+                    $safe[$key] = $Matches[2].Trim().Trim([char]34)
+                  }
+                }
+              }
+
+              $dbServerRaw = [string]$safe['db-server']
+              if ($dbServerRaw -match '^\s*(?<host>[^\s;]+)\s+port\s*=\s*(?<port>\d+)\s*;?\s*$') {
+                $dbHost = $Matches['host']
+                $dbPort = [int]$Matches['port']
+              }
+              elseif ($dbServerRaw -match '^\s*(?<host>[^\s;]+)\s*$') {
+                $dbHost = $Matches['host']
+                $dbPort = 5432
+              }
+              else {
+                throw 'Unexpected PostgreSQL db-server format returned by RAC.'
+              }
+
+              $Ansible.Result = [ordered]@{
+                infobase = [string]$safe['infobase']
+                name = [string]$safe['name']
+                dbms = [string]$safe['dbms']
+                db_server = $dbServerRaw
+                db_host = $dbHost
+                db_port = $dbPort
+                db_name = [string]$safe['db-name']
+                db_user = [string]$safe['db-user']
+              }
+          register: rac_infobase_detail
+          changed_when: false
+          check_mode: false
+
+        - name: Verify all infobase database parameters
+          ansible.builtin.assert:
+            that:
+              - rac_infobase_detail.result.infobase | lower == one_c_infobase_id | lower
+              - rac_infobase_detail.result.name == one_c_infobase_name
+              - rac_infobase_detail.result.dbms == one_c_dbms
+              - rac_infobase_detail.result.db_host == one_c_db_host
+              - rac_infobase_detail.result.db_port | int == one_c_db_port | int
+              - rac_infobase_detail.result.db_name == one_c_db_name
+              - rac_infobase_detail.result.db_user == one_c_db_user
+            fail_msg: >-
+              RAC returned unexpected settings for {{ one_c_infobase_name }}.
+              Safe values: name={{ rac_infobase_detail.result.name | default('missing') }},
+              dbms={{ rac_infobase_detail.result.dbms | default('missing') }},
+              db_host={{ rac_infobase_detail.result.db_host | default('missing') }},
+              db_port={{ rac_infobase_detail.result.db_port | default('missing') }},
+              db_name={{ rac_infobase_detail.result.db_name | default('missing') }},
+              db_user={{ rac_infobase_detail.result.db_user | default('missing') }}.
+            success_msg: >-
+              RAC verified one {{ one_c_infobase_name }} infobase using
+              {{ one_c_dbms }} at
+              {{ one_c_db_host }}:{{ one_c_db_port }}/{{ one_c_db_name }}.
+            quiet: true
