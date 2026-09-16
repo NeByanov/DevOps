@@ -101,3 +101,4 @@
           | Дата: {{ '%Y-%m-%d %H:%M:%S' | strftime(stat_backup.stat.mtime) }}
           | Права: {{ stat_backup.stat.mode }}
           | pg_restore --list: OK
+

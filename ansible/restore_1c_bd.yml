@@ -1,0 +1,600 @@
+---
+# Restore exercise only. Run from the ansible directory:
+#   ansible-playbook restore_1c_bd.yml --check
+#   ansible-playbook restore_1c_bd.yml
+# The second run pauses for a real, interactive 1C client check before cleanup.
+- name: Verify a 1C backup in an isolated temporary infobase
+  hosts: lab_vm
+  gather_facts: false
+  vars:
+    pg_container: postgres-1c
+    backup_directory: /home/vboxuser/backups/postgres-1c
+    source_database: OneC
+    restore_database: OneC_restore_lab
+    source_infobase: one_c_lab
+    restore_infobase: one_c_restore_lab
+    windows_host: win-devops-01
+    rac_exe: "{{ hostvars[windows_host].rac_executable }}"
+    rac_endpoint: "{{ hostvars[windows_host].ras_agent_address }}:{{ hostvars[windows_host].ras_port }}"
+    # PostgreSQL command output is a single JSON object on one line.
+    snapshot_sql: >-
+      SELECT json_build_object(
+        'tables', (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                   WHERE n.nspname='public' AND c.relkind IN ('r','p')),
+        'binrowver', to_regprocedure('public.binrowver(integer)') IS NOT NULL,
+        'reference53_rows', (SELECT count(*) FROM public._reference53),
+        'reference53_digest', (SELECT md5(coalesce(string_agg(row_to_json(t)::text, ','
+                   ORDER BY row_to_json(t)::text), '')) FROM public._reference53 t)
+      )::text;
+    rac_summary_script: |
+      $Ansible.Changed = $false
+      $output = & "{{ rac_exe }}" infobase summary list "{{ rac_endpoint }}" "--cluster={{ restore_cluster_id }}" 2>&1
+      if ($LASTEXITCODE -ne 0) { throw "rac infobase summary list failed: $($output -join [Environment]::NewLine)" }
+      $records = [System.Collections.Generic.List[object]]::new()
+      $current = [ordered]@{}
+      foreach ($lineObject in $output) {
+        $line = [string]$lineObject
+        if ([string]::IsNullOrWhiteSpace($line)) {
+          if ($current.Count -gt 0) { $records.Add([PSCustomObject]$current); $current = [ordered]@{} }
+          continue
+        }
+        if ($line -notmatch '^\s*([^:]+?)\s*:\s*(.*)$') { throw "Unexpected RAC output: $line" }
+        $current[$Matches[1].Trim()] = $Matches[2].Trim().Trim([char]34)
+      }
+      if ($current.Count -gt 0) { $records.Add([PSCustomObject]$current) }
+      $Ansible.Result = @{ records = [object[]]$records.ToArray() }
+    rac_info_script: |
+      $Ansible.Changed = $false
+      $output = & "{{ rac_exe }}" infobase info "{{ rac_endpoint }}" "--cluster={{ restore_cluster_id }}" "--infobase={{ restore_infobase_id }}" 2>&1
+      if ($LASTEXITCODE -ne 0) { throw "rac infobase info failed: $($output -join [Environment]::NewLine)" }
+      $safe = @{}
+      foreach ($lineObject in $output) {
+        $line = [string]$lineObject
+        if ($line -match '^\s*([^:]+?)\s*:\s*(.*)$') {
+          $key = $Matches[1].Trim()
+          if (@('infobase','name','dbms','db-server','db-name','db-user') -contains $key) {
+            $safe[$key] = $Matches[2].Trim().Trim([char]34)
+          }
+        }
+      }
+      $dbServer = [string]$safe['db-server']
+      if ($dbServer -match '^\s*(?<host>[^\s;]+)\s+port\s*=\s*(?<port>\d+)\s*;?\s*$') {
+        $dbHost = $Matches['host']; $dbPort = [int]$Matches['port']
+      } elseif ($dbServer -match '^\s*(?<host>[^\s;]+)\s*$') {
+        $dbHost = $Matches['host']; $dbPort = 5432
+      } else { throw "Unexpected db-server returned by RAC: $dbServer" }
+      $Ansible.Result = @{
+        infobase = [string]$safe['infobase']; name = [string]$safe['name'];
+        dbms = [string]$safe['dbms']; db_host = $dbHost; db_port = $dbPort;
+        db_name = [string]$safe['db-name']; db_user = [string]$safe['db-user']
+      }
+
+  tasks:
+    - name: Require the intended fixed object names and Windows settings
+      ansible.builtin.assert:
+        that:
+          - source_database == 'OneC'
+          - restore_database == 'OneC_restore_lab'
+          - source_infobase == 'one_c_lab'
+          - restore_infobase == 'one_c_restore_lab'
+          - hostvars[windows_host].one_c_dbms == 'PostgreSQL'
+          - hostvars[windows_host].one_c_db_host == '192.168.56.101'
+          - hostvars[windows_host].one_c_db_port | int == 5432
+          - hostvars[windows_host].one_c_db_user == 'one_c_db_user'
+        quiet: true
+
+    - name: Require the vaulted PostgreSQL password used by RAC
+      ansible.builtin.assert:
+        that:
+          - hostvars[windows_host].one_c_db_password is defined
+          - hostvars[windows_host].one_c_db_password | string | length > 0
+        quiet: true
+      no_log: true
+
+    - name: Read the 1C cluster ID
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+          $output = & "{{ rac_exe }}" cluster list "{{ rac_endpoint }}" 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "rac cluster list failed: $($output -join [Environment]::NewLine)" }
+          $ids = @($output | ForEach-Object {
+            if ([string]$_ -match '^\s*cluster\s*:\s*(\S+)\s*$') { $Matches[1].ToLowerInvariant() }
+          })
+          $Ansible.Result = @{ cluster_ids = [string[]]$ids }
+      delegate_to: "{{ windows_host }}"
+      register: restore_cluster_query
+      changed_when: false
+      check_mode: false
+
+    - name: Require exactly one 1C cluster
+      ansible.builtin.assert:
+        that:
+          - restore_cluster_query.result.cluster_ids | default([], true) | length == 1
+        quiet: true
+
+    - name: Remember the cluster ID
+      ansible.builtin.set_fact:
+        restore_cluster_id: "{{ restore_cluster_query.result.cluster_ids[0] }}"
+
+    - name: Read existing RAC infobases
+      ansible.windows.win_powershell:
+        script: "{{ rac_summary_script }}"
+      delegate_to: "{{ windows_host }}"
+      register: rac_before
+      changed_when: false
+      check_mode: false
+
+    - name: Require only the working infobase before starting
+      ansible.builtin.assert:
+        that:
+          - rac_before.result.records | default([], true) | length == 1
+          - rac_before.result.records[0].name == source_infobase
+          - rac_before.result.records[0].infobase is defined
+        fail_msg: RAC has an unexpected registration; no temporary object will be changed.
+        quiet: true
+
+    - name: Remember the working infobase ID
+      ansible.builtin.set_fact:
+        source_infobase_id: "{{ rac_before.result.records[0].infobase }}"
+
+    - name: Read source and temporary database OIDs
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ pg_container }}"
+          - psql
+          - -XAt
+          - -v
+          - ON_ERROR_STOP=1
+          - -U
+          - one_c_db_user
+          - -d
+          - postgres
+          - -c
+          - >-
+            SELECT coalesce((SELECT oid::text FROM pg_database WHERE datname='OneC'),''),
+                   coalesce((SELECT oid::text FROM pg_database WHERE datname='OneC_restore_lab'),'');
+      register: database_oids_before
+      changed_when: false
+      check_mode: false
+
+    - name: Require the source database and an absent temporary database
+      ansible.builtin.assert:
+        that:
+          - database_oids_before.stdout.split('|') | length == 2
+          - database_oids_before.stdout.split('|')[0] | length > 0
+          - database_oids_before.stdout.split('|')[1] | length == 0
+        fail_msg: Temporary PostgreSQL database already exists or source is missing; refusing to modify it.
+        quiet: true
+
+    - name: Remember the source database OID
+      ansible.builtin.set_fact:
+        source_database_oid: "{{ database_oids_before.stdout.split('|')[0] }}"
+
+    - name: Read working database metrics before restoration
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ pg_container }}"
+          - psql
+          - -XAt
+          - -v
+          - ON_ERROR_STOP=1
+          - -U
+          - one_c_db_user
+          - -d
+          - "{{ source_database }}"
+          - -c
+          - "{{ snapshot_sql }}"
+      register: source_snapshot_before_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Remember the working database metrics
+      ansible.builtin.set_fact:
+        source_snapshot_before: "{{ source_snapshot_before_raw.stdout | from_json }}"
+
+    - name: Find local custom-format backups
+      ansible.builtin.find:
+        paths: "{{ backup_directory }}"
+        patterns: '*.dump'
+        file_type: file
+        recurse: false
+      register: backup_files
+
+    - name: Require at least one candidate archive
+      ansible.builtin.assert:
+        that:
+          - backup_files.files | length > 0
+        quiet: true
+
+    - name: Fully decode backups in newest-first order without restoring
+      ansible.builtin.shell: >-
+        docker exec -i {{ pg_container | quote }} pg_restore --file=/dev/null
+        < {{ item.path | quote }}
+      args:
+        executable: /bin/bash
+      loop: "{{ backup_files.files | sort(attribute='mtime', reverse=true) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      register: archive_checks
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Select the newest fully readable archive
+      ansible.builtin.set_fact:
+        restore_archive: "{{ item.item.path }}"
+      loop: "{{ archive_checks.results }}"
+      loop_control:
+        label: "{{ item.item.path | basename }}"
+      when:
+        - item.rc == 0
+        - restore_archive is not defined
+
+    - name: Require a valid archive and expected source data
+      ansible.builtin.assert:
+        that:
+          - restore_archive is defined
+          - source_snapshot_before.tables | int > 0
+          - source_snapshot_before.binrowver | bool
+          - source_snapshot_before.reference53_rows | int > 0
+        fail_msg: No valid backup or the working database lacks expected 1C lab objects.
+        quiet: true
+
+    - name: Explain check mode without creating either temporary object
+      ansible.builtin.debug:
+        msg: >-
+          Check mode passed. Would restore {{ restore_archive | basename }} into
+          {{ restore_database }}, register {{ restore_infobase }}, wait for a real
+          1C client check, then remove only those temporary objects.
+      when: ansible_check_mode
+
+    - name: Restore, verify and remove only temporary objects
+      when: not ansible_check_mode
+      block:
+        - name: Create the temporary PostgreSQL database
+          ansible.builtin.command:
+            argv:
+              - docker
+              - exec
+              - "{{ pg_container }}"
+              - createdb
+              - -U
+              - one_c_db_user
+              - -O
+              - one_c_db_user
+              - -T
+              - template0
+              - "{{ restore_database }}"
+
+        - name: Read the newly created database OID
+          ansible.builtin.command:
+            argv:
+              - docker
+              - exec
+              - "{{ pg_container }}"
+              - psql
+              - -XAt
+              - -v
+              - ON_ERROR_STOP=1
+              - -U
+              - one_c_db_user
+              - -d
+              - postgres
+              - -c
+              - "SELECT oid FROM pg_database WHERE datname='OneC_restore_lab';"
+          register: temp_database_oid_raw
+          changed_when: false
+
+        - name: Remember the newly created database OID
+          ansible.builtin.set_fact:
+            temp_database_oid: "{{ temp_database_oid_raw.stdout }}"
+
+        - name: Restore the archive without recreating the working database
+          ansible.builtin.shell: >-
+            docker exec -i {{ pg_container | quote }} pg_restore
+            --single-transaction --exit-on-error --no-owner --no-acl
+            -U one_c_db_user -d {{ restore_database | quote }}
+            < {{ restore_archive | quote }}
+          args:
+            executable: /bin/bash
+
+        - name: Read restored database metrics
+          ansible.builtin.command:
+            argv:
+              - docker
+              - exec
+              - "{{ pg_container }}"
+              - psql
+              - -XAt
+              - -v
+              - ON_ERROR_STOP=1
+              - -U
+              - one_c_db_user
+              - -d
+              - "{{ restore_database }}"
+              - -c
+              - "{{ snapshot_sql }}"
+          register: restore_snapshot_raw
+          changed_when: false
+
+        - name: Compare temporary and working database metrics
+          ansible.builtin.assert:
+            that:
+              - (restore_snapshot_raw.stdout | from_json).tables | int == source_snapshot_before.tables | int
+              - (restore_snapshot_raw.stdout | from_json).binrowver | bool
+              - (restore_snapshot_raw.stdout | from_json).reference53_rows | int == source_snapshot_before.reference53_rows | int
+              - (restore_snapshot_raw.stdout | from_json).reference53_digest == source_snapshot_before.reference53_digest
+            fail_msg: The restored database does not match the working lab database.
+            quiet: true
+
+        - name: Mark the exact RAC create operation as attempted
+          ansible.builtin.set_fact:
+            rac_create_attempted: true
+
+        - name: Register the temporary database in the existing 1C cluster
+          ansible.windows.win_command:
+            argv:
+              - "{{ rac_exe }}"
+              - infobase
+              - create
+              - "{{ rac_endpoint }}"
+              - "--cluster={{ restore_cluster_id }}"
+              - "--name={{ restore_infobase }}"
+              - "--dbms={{ hostvars[windows_host].one_c_dbms }}"
+              - "--db-server={{ hostvars[windows_host].one_c_db_host }} port={{ hostvars[windows_host].one_c_db_port }}"
+              - "--db-name={{ restore_database }}"
+              - "--db-user={{ hostvars[windows_host].one_c_db_user }}"
+              - "--db-pwd={{ hostvars[windows_host].one_c_db_password }}"
+              - "--locale={{ hostvars[windows_host].one_c_infobase_locale }}"
+          delegate_to: "{{ windows_host }}"
+          no_log: true
+
+        - name: Read both RAC registrations
+          ansible.windows.win_powershell:
+            script: "{{ rac_summary_script }}"
+          delegate_to: "{{ windows_host }}"
+          register: rac_after_create
+          changed_when: false
+
+        - name: Require exactly the working and temporary infobases
+          ansible.builtin.assert:
+            that:
+              - rac_after_create.result.records | length == 2
+              - rac_after_create.result.records | selectattr('name', 'equalto', source_infobase) | list | length == 1
+              - rac_after_create.result.records | selectattr('name', 'equalto', restore_infobase) | list | length == 1
+            quiet: true
+
+        - name: Remember the temporary infobase ID
+          ansible.builtin.set_fact:
+            restore_infobase_id: >-
+              {{ (rac_after_create.result.records | selectattr('name', 'equalto', restore_infobase) | list)[0].infobase }}
+
+        - name: Read the temporary infobase mapping from RAC
+          ansible.windows.win_powershell:
+            script: "{{ rac_info_script }}"
+          delegate_to: "{{ windows_host }}"
+          register: rac_temp_info
+          changed_when: false
+
+        - name: Verify the temporary infobase maps only to the restored database
+          ansible.builtin.assert:
+            that:
+              - rac_temp_info.result.infobase | lower == restore_infobase_id | lower
+              - rac_temp_info.result.name == restore_infobase
+              - rac_temp_info.result.dbms == 'PostgreSQL'
+              - rac_temp_info.result.db_host == '192.168.56.101'
+              - rac_temp_info.result.db_port | int == 5432
+              - rac_temp_info.result.db_name == restore_database
+              - rac_temp_info.result.db_user == 'one_c_db_user'
+            quiet: true
+
+        - name: Wait for interactive 1C client verification
+          ansible.builtin.pause:
+            prompt: >-
+              Open one_c_restore_lab in a real 1C client, verify the educational
+              _reference53 record, then CLOSE the client. Type YES to remove
+              the temporary registration and database. Any other answer marks
+              the test failed, but still attempts safe cleanup
+          register: client_confirmation
+
+        - name: Require explicit confirmation of the 1C client check
+          ansible.builtin.assert:
+            that:
+              - client_confirmation.user_input | trim | upper == 'YES'
+            fail_msg: Interactive 1C client verification was not confirmed.
+            quiet: true
+
+      rescue:
+        - name: Remember that the restore or client check failed
+          ansible.builtin.set_fact:
+            restore_stage_failed: true
+
+      always:
+        - name: Read RAC registrations before temporary cleanup
+          ansible.windows.win_powershell:
+            script: "{{ rac_summary_script }}"
+          delegate_to: "{{ windows_host }}"
+          register: rac_before_cleanup
+          changed_when: false
+
+        - name: Select only the temporary RAC registration
+          ansible.builtin.set_fact:
+            cleanup_temp_rac: >-
+              {{ rac_before_cleanup.result.records | selectattr('name', 'equalto', restore_infobase) | list }}
+            cleanup_source_rac: >-
+              {{ rac_before_cleanup.result.records | selectattr('name', 'equalto', source_infobase) | list }}
+
+        - name: Refuse cleanup if RAC registrations are ambiguous
+          ansible.builtin.assert:
+            that:
+              - cleanup_temp_rac | length <= 1
+              - cleanup_temp_rac | length == 0 or rac_create_attempted | default(false) | bool
+              - cleanup_source_rac | length == 1
+              - cleanup_source_rac[0].infobase | lower == source_infobase_id | lower
+              - rac_before_cleanup.result.records | length == (cleanup_source_rac | length + cleanup_temp_rac | length)
+            fail_msg: RAC changed unexpectedly; temporary PostgreSQL database is left intact.
+            quiet: true
+
+        - name: Remember exact temporary RAC ID if registration exists
+          # A captured UUID must never silently change between creation and cleanup.
+          # Name-only recovery is permitted only if create succeeded but its reply was lost.
+          ansible.builtin.set_fact:
+            restore_infobase_id: "{{ cleanup_temp_rac[0].infobase }}"
+          when:
+            - cleanup_temp_rac | length == 1
+            - restore_infobase_id is not defined
+
+        - name: Refuse to remove a replacement RAC registration
+          ansible.builtin.assert:
+            that:
+              - cleanup_temp_rac[0].infobase | lower == restore_infobase_id | lower
+            fail_msg: Temporary RAC UUID changed after registration; refusing cleanup.
+            quiet: true
+          when: cleanup_temp_rac | length == 1
+
+        - name: Verify the temporary RAC mapping before deregistration
+          ansible.windows.win_powershell:
+            script: "{{ rac_info_script }}"
+          delegate_to: "{{ windows_host }}"
+          register: cleanup_rac_info
+          changed_when: false
+          when: cleanup_temp_rac | length == 1
+
+        - name: Require exact temporary RAC target before deregistration
+          ansible.builtin.assert:
+            that:
+              - cleanup_rac_info.result.infobase | lower == restore_infobase_id | lower
+              - cleanup_rac_info.result.name == restore_infobase
+              - cleanup_rac_info.result.db_name == restore_database
+              - cleanup_rac_info.result.db_host == '192.168.56.101'
+              - cleanup_rac_info.result.db_port | int == 5432
+            fail_msg: Temporary RAC registration points elsewhere; refusing to remove it or its database.
+            quiet: true
+          when: cleanup_temp_rac | length == 1
+
+        - name: Remove only the temporary RAC registration
+          ansible.windows.win_command:
+            argv:
+              - "{{ rac_exe }}"
+              - infobase
+              - drop
+              - "{{ rac_endpoint }}"
+              - "--cluster={{ restore_cluster_id }}"
+              - "--infobase={{ restore_infobase_id }}"
+          delegate_to: "{{ windows_host }}"
+          when: cleanup_temp_rac | length == 1
+
+        - name: Confirm temporary RAC registration is gone
+          ansible.windows.win_powershell:
+            script: "{{ rac_summary_script }}"
+          delegate_to: "{{ windows_host }}"
+          register: rac_after_cleanup
+          changed_when: false
+
+        - name: Require only the original RAC registration before dropping PostgreSQL database
+          ansible.builtin.assert:
+            that:
+              - rac_after_cleanup.result.records | length == 1
+              - rac_after_cleanup.result.records[0].name == source_infobase
+              - rac_after_cleanup.result.records[0].infobase | lower == source_infobase_id | lower
+            fail_msg: RAC cleanup is unconfirmed; temporary PostgreSQL database remains for safe investigation.
+            quiet: true
+
+        - name: Read the exact temporary PostgreSQL database OID
+          ansible.builtin.command:
+            argv:
+              - docker
+              - exec
+              - "{{ pg_container }}"
+              - psql
+              - -XAt
+              - -v
+              - ON_ERROR_STOP=1
+              - -U
+              - one_c_db_user
+              - -d
+              - postgres
+              - -c
+              - "SELECT coalesce((SELECT oid::text FROM pg_database WHERE datname='OneC_restore_lab'),'');"
+          register: temp_database_oid_before_drop
+          changed_when: false
+
+        - name: Refuse to drop a database with a different captured OID
+          ansible.builtin.assert:
+            that:
+              - temp_database_oid_before_drop.stdout | length == 0 or
+                (temp_database_oid is defined and temp_database_oid_before_drop.stdout == temp_database_oid)
+            fail_msg: Temporary database OID is unexpected; refusing to delete it.
+            quiet: true
+
+        - name: Drop only the temporary PostgreSQL database
+          ansible.builtin.command:
+            argv:
+              - docker
+              - exec
+              - "{{ pg_container }}"
+              - dropdb
+              - -U
+              - one_c_db_user
+              # RAC is already gone; close only residual sessions of this OID-verified DB.
+              - --force
+              - "{{ restore_database }}"
+          when: temp_database_oid_before_drop.stdout | length > 0
+
+        - name: Read final PostgreSQL database OIDs
+          ansible.builtin.command:
+            argv:
+              - docker
+              - exec
+              - "{{ pg_container }}"
+              - psql
+              - -XAt
+              - -v
+              - ON_ERROR_STOP=1
+              - -U
+              - one_c_db_user
+              - -d
+              - postgres
+              - -c
+              - >-
+                SELECT coalesce((SELECT oid::text FROM pg_database WHERE datname='OneC'),''),
+                       coalesce((SELECT oid::text FROM pg_database WHERE datname='OneC_restore_lab'),'');
+          register: database_oids_after
+          changed_when: false
+
+        - name: Read final working database metrics
+          ansible.builtin.command:
+            argv:
+              - docker
+              - exec
+              - "{{ pg_container }}"
+              - psql
+              - -XAt
+              - -v
+              - ON_ERROR_STOP=1
+              - -U
+              - one_c_db_user
+              - -d
+              - "{{ source_database }}"
+              - -c
+              - "{{ snapshot_sql }}"
+          register: source_snapshot_after_raw
+          changed_when: false
+
+        - name: Prove the working database is unchanged and temporary database is absent
+          ansible.builtin.assert:
+            that:
+              - database_oids_after.stdout.split('|')[0] == source_database_oid
+              - database_oids_after.stdout.split('|')[1] | length == 0
+              - (source_snapshot_after_raw.stdout | from_json) == source_snapshot_before
+            fail_msg: Final PostgreSQL safety check failed.
+            quiet: true
+
+    - name: Report an unsuccessful restore or unconfirmed client check
+      ansible.builtin.fail:
+        msg: The temporary objects were cleaned up, but restoration or client verification failed.
+      when: restore_stage_failed | default(false) | bool
