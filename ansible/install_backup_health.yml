@@ -1,4 +1,9 @@
 ---
+# install_backup_health.yml
+# Воспроизводимая установка скрипта проверки и systemd-юнитов.
+# Идемпотентно. Проверка запускается в конце плейбука —
+# если бэкапа ещё нет, плейбук упадёт с понятным сообщением.
+
 - name: Install 1C backup health check
   hosts: lab_vm
   become: true
@@ -10,6 +15,8 @@
     unit_files:
       - one-c-backup-health.service
       - one-c-backup-health.timer
+    # Установить в true для первичной установки без бэкапа
+    skip_health_check: false
 
   tasks:
     # ── Скрипт ──────────────────────────────────────────────────
@@ -41,16 +48,29 @@
         state: started
         daemon_reload: true
 
-    # ── Проверка (dry run, не падает если бэкапа ещё нет) ────────
-    - name: Run health check manually to verify
+    # ── Ручная проверка ─────────────────────────────────────────
+    - name: Run health check to verify
       ansible.builtin.command: "{{ script_dest }}"
+      become: true
+      become_user: vboxuser
       register: health_result
       changed_when: false
-      failed_when: false
+      when: not skip_health_check
 
-    - name: Show health check result
+    - name: Show health check output
       ansible.builtin.debug:
-        msg: "{{ health_result.stdout_lines | default(['(no output)']) }}"
+        msg: "{{ health_result.stdout_lines | default(['(skipped)']) }}"
+      when: not skip_health_check
+
+    - name: Fail if health check did not pass
+      ansible.builtin.fail:
+        msg: |
+          Health check failed (rc={{ health_result.rc | default('N/A') }}):
+          {{ health_result.stderr_lines | default(['(no output)']) | join('\n') }}
+          Если бэкапа ещё нет — запустите с: -e skip_health_check=true
+      when:
+        - not skip_health_check
+        - health_result.rc | default(0) != 0
 
   handlers:
     - name: Reload systemd
