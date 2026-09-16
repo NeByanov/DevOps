@@ -16,7 +16,7 @@
         state: directory
         owner: vboxuser
         group: vboxuser
-        mode: "0755"
+        mode: "0700"
 
     - name: Copy systemd unit files
       ansible.builtin.copy:
