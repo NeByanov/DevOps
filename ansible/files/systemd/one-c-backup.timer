@@ -1,0 +1,12 @@
+[Unit]
+Description=Run backupbd every 1 hour
+
+[Timer]
+OnBootSec=1min
+OnCalendar=daily
+Persistent=true
+AccuracySec=1m
+Unit=one-c-backup.service
+
+[Install]
+WantedBy=timers.target

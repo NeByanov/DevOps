@@ -1,0 +1,27 @@
+[Unit]
+Description= backup 1C to object storage
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=vboxuser
+Group=vboxuser
+
+# Создать каталоги с правильными правами при старте
+WorkingDirectory=/home/vboxuser/backups/postgres-1c
+
+# Блокировка от конкурентных запусков
+ExecStart=/usr/bin/ansible-playbook \
+    -i /home/vboxuser/dockerproject/Site/ansible/inventory.yml \
+    /home/vboxuser/dockerproject/Site/ansible/backup_1c_db.yml
+
+Environment=ANSIBLE_CONFIG=/home/vboxuser/dockerproject/Site/ansible/ansible.cfg
+
+# Если бэкап длинный — снимите ограничение времени или увеличьте
+TimeoutStartSec=0
+Nice=10
+IOSchedulingClass=best-effort
+
+[Install]
+WantedBy=multi-user.target
