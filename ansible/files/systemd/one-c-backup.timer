@@ -1,5 +1,5 @@
 [Unit]
-Description=Run backupbd every 1 hour
+Description=Run backupbd day
 
 [Timer]
 OnBootSec=1min
