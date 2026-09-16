@@ -1,0 +1,13 @@
+[Unit]
+Description=Run 1C backup health check daily after main backup
+
+[Timer]
+# Основной бэкап по daily запускается в 00:00.
+# Проверка — в 01:00, давая запас времени на завершение.
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+AccuracySec=1m
+Unit=one-c-backup-health.service
+
+[Install]
+WantedBy=timers.target
