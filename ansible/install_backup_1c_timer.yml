@@ -1,0 +1,39 @@
+---
+- name: Install 1C backup systemd units
+  hosts: lab_vm
+  become: true
+
+  vars:
+    systemd_dir: /etc/systemd/system
+    unit_files:
+      - one-c-backup.service
+      - one-c-backup.timer
+
+  tasks:
+    - name: Ensure backups directory exists
+      ansible.builtin.file:
+        path: /home/vboxuser/backups/postgres-1c
+        state: directory
+        owner: vboxuser
+        group: vboxuser
+        mode: "0755"
+
+    - name: Copy systemd unit files
+      ansible.builtin.copy:
+        src: "files/systemd/{{ item }}"
+        dest: "{{ systemd_dir }}/{{ item }}"
+        mode: "0644"
+      loop: "{{ unit_files }}"
+      notify: Reload systemd
+
+    - name: Enable and start timer
+      ansible.builtin.systemd:
+        name: one-c-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

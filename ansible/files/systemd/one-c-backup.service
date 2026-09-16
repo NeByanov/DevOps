@@ -1,5 +1,5 @@
 [Unit]
-Description= backup 1C to object storage
+Description= backup 1C
 Wants=network-online.target
 After=network-online.target
 
