@@ -1,0 +1,103 @@
+- name: Verify lab VM configuration and backup integrity
+  hosts: lab_vm
+  gather_facts: true
+
+  vars:
+    backup_dir: "{{ ansible_env.HOME }}/backups/postgres-1c"
+
+  tasks:
+    - name: Populate service facts
+      ansible.builtin.service_facts:
+
+    - name: Run backup script
+      ansible.builtin.command:
+        cmd: ~/dockerproject/Site/ansible/backups.sh
+      environment:
+        POSTGRES_DB: "{{ postgres_db }}"
+        POSTGRES_USER: "{{ postgres_user }}"
+        POSTGRES_PASSWORD: "{{ postgres_password }}"
+      register: backup_result
+      failed_when: backup_result.rc != 0
+      no_log: true
+
+    - name: Skip verification in check mode
+      ansible.builtin.meta: end_host
+      when: backup_result.skipped | default(false)
+
+    - name: Show script output
+      ansible.builtin.debug:
+        msg: "Вывод скрипта:\n{{ backup_result.stdout }}"
+
+    - name: Extract backup file path
+      ansible.builtin.set_fact:
+        backup_file: "{{ (backup_result.stdout | regex_search('Backup completed: (.+)', '\\1') | first) | trim }}"
+
+    - name: Show extracted path
+      ansible.builtin.debug:
+        msg: "Путь к дампу: {{ backup_file }}"
+
+    - name: Get backup file stats
+      ansible.builtin.stat:
+        path: "{{ backup_file }}"
+      register: stat_backup
+
+    - name: Assert file exists and is regular
+      ansible.builtin.assert:
+        that:
+          - stat_backup.stat.exists
+          - stat_backup.stat.isreg
+        fail_msg: "Файл не найден: {{ backup_file }}"
+        success_msg: "Файл существует: {{ backup_file }}"
+
+    - name: Assert file size > 0
+      ansible.builtin.assert:
+        that:
+          - stat_backup.stat.size > 0
+        fail_msg: "Файл пустой: {{ backup_file }}"
+        success_msg: "Размер: {{ stat_backup.stat.size }} байт ({{ (stat_backup.stat.size / 1024 / 1024) | round(2) }} МБ)"
+
+    - name: Show file metadata
+      ansible.builtin.debug:
+        msg: >-
+          Дата: {{ '%Y-%m-%d %H:%M:%S' | strftime(stat_backup.stat.mtime) }}
+          | Права: {{ stat_backup.stat.mode }}
+          | Владелец: {{ stat_backup.stat.uid }}:{{ stat_backup.stat.gid }}
+
+    - name: Assert file permissions are 0600
+      ansible.builtin.assert:
+        that:
+          - stat_backup.stat.mode == "0600"
+        fail_msg: "Права файла {{ stat_backup.stat.mode }} — ожидалось 0600"
+        success_msg: "Права файла — 0600, OK"
+
+    # ---- Проверка архива через pg_restore --list ----
+    - name: Validate backup with pg_restore --list
+      ansible.builtin.shell: |
+        cat "{{ backup_file }}" | docker exec -i postgres-1c pg_restore --list
+      register: restore_list
+      changed_when: false
+      failed_when: restore_list.rc != 0
+
+    - name: Show archive contents (first 10 lines)
+      ansible.builtin.debug:
+        msg: "Содержимое архива (первые 10 строк):\n{{ restore_list.stdout_lines[:10] | join('\n') }}"
+
+    - name: Assert pg_restore --list succeeded
+      ansible.builtin.assert:
+        that:
+          - restore_list.rc == 0
+        fail_msg: |
+          pg_restore --list завершился ошибкой — архив повреждён.
+          RC: {{ restore_list.rc }}
+          Stderr: {{ restore_list.stderr }}
+        success_msg: "Архив читается через pg_restore --list — валиден"
+
+    - name: Backup verification summary
+      ansible.builtin.debug:
+        msg: >-
+          ✅ Проверка завершена.
+          Файл: {{ backup_file }}
+          | Размер: {{ stat_backup.stat.size }} байт ({{ (stat_backup.stat.size / 1024 / 1024) | round(2) }} МБ)
+          | Дата: {{ '%Y-%m-%d %H:%M:%S' | strftime(stat_backup.stat.mtime) }}
+          | Права: {{ stat_backup.stat.mode }}
+          | pg_restore --list: OK
