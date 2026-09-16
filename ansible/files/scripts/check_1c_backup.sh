@@ -37,7 +37,7 @@ age_hours=$(( (now - file_mtime) / 3600 ))
     || die "newest .dump is $age_hours hours old (max $MAX_AGE_HOURS)"
 
 # ── 6. Целостность через pg_restore --list внутри контейнера ────
-if ! docker exec -i "$PG_CONTAINER" pg_restore --list - < "$latest_dump" >/dev/null 2>&1; then
+if ! docker exec -i "$PG_CONTAINER" pg_restore --list < "$latest_dump" >/dev/null 2>&1; then
     die "pg_restore --list failed inside container '$PG_CONTAINER' — dump may be corrupted"
 fi
 
