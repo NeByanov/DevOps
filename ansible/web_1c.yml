@@ -1,0 +1,290 @@
+---
+- name: Publish the existing 1C infobase through the dedicated IIS lab site
+  hosts: windows_hosts
+  gather_facts: false
+  vars:
+    web_publish_dir: 'C:\inetpub\{{ one_c_web_alias }}'
+    webinst_exe: '{{ one_c_bin_dir }}\webinst.exe'
+
+  tasks:
+    - name: Confirm the fixed lab target and server-side 1C connection
+      ansible.builtin.assert:
+        that:
+          - one_c_web_site_name == '127.0.0.1'
+          - one_c_web_bind_ip == '192.168.56.103'
+          - one_c_web_port | int == 8082
+          - one_c_web_alias == 'trainingBase'
+          - one_c_web_allowed_subnet == '192.168.56.0/24'
+          - one_c_web_connstr == ('Srvr=localhost;Ref=' ~ one_c_infobase_name ~ ';')
+          - one_c_infobase_name == 'one_c_lab'
+          - one_c_web_connstr is not search('(?i)(?:^|;)\s*(?:usr|pwd|password|user)\s*=')
+        fail_msg: Refusing to publish to an unexpected address, infobase, or embedded credential.
+        quiet: true
+
+    - name: Ensure IIS ISAPI Extensions are installed
+      ansible.windows.win_feature:
+        name: Web-ISAPI-Ext
+        state: present
+      register: isapi_feature
+
+    - name: Do not continue if Windows requires a reboot for ISAPI Extensions
+      ansible.builtin.assert:
+        that:
+          - not isapi_feature.reboot_required | default(false) | bool
+        fail_msg: Windows requires a reboot before publishing 1C; no automatic reboot is performed.
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Ensure the publication directory exists
+      ansible.windows.win_file:
+        path: '{{ web_publish_dir }}'
+        state: directory
+
+    - name: Inspect the publication descriptor without returning its connection string
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+          $vrdPath = '{{ web_publish_dir }}\default.vrd'
+          $configPath = '{{ web_publish_dir }}\web.config'
+          $ready = $false
+          $noCredentials = $true
+          if ((Test-Path -LiteralPath $vrdPath) -and (Test-Path -LiteralPath $configPath)) {
+            try {
+              [xml]$vrd = Get-Content -LiteralPath $vrdPath -Raw
+              $point = $vrd.DocumentElement
+              $ib = [string]$point.GetAttribute('ib')
+              $base = [string]$point.GetAttribute('base')
+              $noCredentials = $ib -notmatch '(?i)(?:^|;)\s*(?:usr|pwd|password|user)\s*='
+              $ready = $ib -eq '{{ one_c_web_connstr }}' -and
+                $base.Trim('/') -ieq '{{ one_c_web_alias }}' -and $noCredentials
+            } catch { $ready = $false }
+          }
+          $Ansible.Result = @{ ready = [bool]$ready; no_credentials = [bool]$noCredentials }
+      register: publication_before
+      changed_when: false
+      check_mode: false
+
+    - name: Fail safely if an existing descriptor contains embedded credentials
+      ansible.builtin.assert:
+        that:
+          - publication_before.result.no_credentials | bool
+        fail_msg: Existing default.vrd contains client credentials; inspect it securely before republishing.
+        quiet: true
+
+    - name: Create or refresh 1C publication files with the real cluster infobase
+      ansible.windows.win_command:
+        argv:
+          - '{{ webinst_exe }}'
+          - -publish
+          - -iis
+          - -wsdir
+          - '{{ one_c_web_alias }}'
+          - -dir
+          - '{{ web_publish_dir }}'
+          - -connstr
+          - '{{ one_c_web_connstr }}'
+      when:
+        - not ansible_check_mode
+        - not publication_before.result.ready | bool
+      no_log: true
+
+    - name: Verify the generated descriptor, path and lack of client credentials
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+          $vrdPath = '{{ web_publish_dir }}\default.vrd'
+          $configPath = '{{ web_publish_dir }}\web.config'
+          if (-not (Test-Path -LiteralPath $vrdPath)) { throw '1C default.vrd is absent' }
+          if (-not (Test-Path -LiteralPath $configPath)) { throw '1C web.config is absent' }
+          [xml]$vrd = Get-Content -LiteralPath $vrdPath -Raw
+          $point = $vrd.DocumentElement
+          $ib = [string]$point.GetAttribute('ib')
+          $base = [string]$point.GetAttribute('base')
+          if ($ib -match '(?i)(?:^|;)\s*(?:usr|pwd|password|user)\s*=') {
+            throw '1C default.vrd contains client credentials'
+          }
+          if ($ib -ne '{{ one_c_web_connstr }}' -or $base.Trim('/') -ine '{{ one_c_web_alias }}') {
+            throw '1C default.vrd does not target the intended cluster infobase or alias'
+          }
+          $Ansible.Result = @{ publication_valid = $true; credentials_absent = $true }
+      changed_when: false
+      check_mode: false
+      when:
+        - not ansible_check_mode or publication_before.result.ready | bool
+
+    - name: Create a dedicated 32-bit unmanaged IIS application pool for 1C
+      microsoft.iis.web_app_pool:
+        name: '{{ one_c_web_app_pool }}'
+        state: started
+        attributes:
+          managedRuntimeVersion: ''
+          managedPipelineMode: Integrated
+          enable32BitAppOnWin64: true
+          processModel.identityType: ApplicationPoolIdentity
+
+    - name: Bind only the existing lab IIS site to the Host-Only address
+      microsoft.iis.website:
+        name: '{{ one_c_web_site_name }}'
+        physical_path: 'C:\inetpub\wwwroot'
+        state: started
+        bindings:
+          set:
+            - ip: '{{ one_c_web_bind_ip }}'
+              port: '{{ one_c_web_port | int }}'
+              protocol: http
+
+    - name: Attach the publication to the dedicated IIS site and pool
+      microsoft.iis.web_application:
+        site: '{{ one_c_web_site_name }}'
+        name: '{{ one_c_web_alias }}'
+        physical_path: '{{ web_publish_dir }}'
+        application_pool: '{{ one_c_web_app_pool }}'
+        state: present
+
+    - name: Allow the dedicated pool to read the publication files
+      ansible.windows.win_acl:
+        path: '{{ web_publish_dir }}'
+        user: 'IIS AppPool\{{ one_c_web_app_pool }}'
+        rights: ReadAndExecute
+        type: allow
+        state: present
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+
+    - name: Allow the dedicated pool to execute the 1C web extension
+      ansible.windows.win_acl:
+        path: '{{ one_c_bin_dir }}'
+        user: 'IIS AppPool\{{ one_c_web_app_pool }}'
+        rights: ReadAndExecute
+        type: allow
+        state: present
+        inherit: ContainerInherit, ObjectInherit
+        propagation: None
+
+    - name: Inspect an optional Default Web Site application from webinst
+      microsoft.iis.web_application_info:
+        site: Default Web Site
+        name: '{{ one_c_web_alias }}'
+      register: default_site_app
+
+    - name: Refuse to remove an unrelated Default Web Site application
+      ansible.builtin.assert:
+        that:
+          - not default_site_app.exists or
+            (default_site_app.applications | length == 1 and
+             (default_site_app.applications[0].physical_path | lower | replace('\\', '/')) ==
+             (web_publish_dir | lower | replace('\\', '/')))
+        fail_msg: Default Web Site has a same-named application with a different physical path.
+        quiet: true
+
+    - name: Remove only webinst's duplicate publication from Default Web Site
+      microsoft.iis.web_application:
+        site: Default Web Site
+        name: '{{ one_c_web_alias }}'
+        state: absent
+      when: default_site_app.exists
+
+    - name: Allow HTTP to 1C publication only from the Host-Only subnet
+      community.windows.win_firewall_rule:
+        name: 1C web client 8082 Host-Only
+        description: 1C web client on the Windows lab VM, reachable only from VirtualBox Host-Only
+        state: present
+        enabled: true
+        direction: in
+        action: allow
+        protocol: tcp
+        localip: '{{ one_c_web_bind_ip }}'
+        localport: '{{ one_c_web_port }}'
+        remoteip: '{{ one_c_web_allowed_subnet }}'
+        profiles: domain,private,public
+
+    - name: Verify the exact Windows Firewall rule scope
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+          $rules = @(Get-NetFirewallRule -DisplayName '1C web client 8082 Host-Only' -ErrorAction Stop)
+          if ($rules.Count -ne 1) { throw 'Expected exactly one 1C web firewall rule' }
+          $rule = $rules[0]
+          $port = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule
+          $address = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule
+          $Ansible.Result = @{
+            enabled = [string]$rule.Enabled
+            direction = [string]$rule.Direction
+            action = [string]$rule.Action
+            protocol = [string]$port.Protocol
+            local_port = [string]$port.LocalPort
+            local_address = [string]$address.LocalAddress
+            remote_address = [string]$address.RemoteAddress
+            scoped = (
+              [string]$rule.Enabled -eq 'True' -and
+              [string]$rule.Direction -eq 'Inbound' -and
+              [string]$rule.Action -eq 'Allow' -and
+              [string]$port.Protocol -in @('TCP', '6') -and
+              [string]$port.LocalPort -eq '{{ one_c_web_port }}' -and
+              [string]$address.LocalAddress -eq '{{ one_c_web_bind_ip }}' -and
+              [string]$address.RemoteAddress -in @(
+                '{{ one_c_web_allowed_subnet }}', '192.168.56.0/255.255.255.0'
+              )
+            )
+          }
+      register: web_firewall_check
+      changed_when: false
+      check_mode: false
+
+    - name: Require the 8082 rule to accept only Host-Only clients
+      ansible.builtin.assert:
+        that:
+          - web_firewall_check.result.scoped | bool
+        fail_msg: >-
+          Unexpected Windows Firewall scope:
+          {{ web_firewall_check.result | to_json }}
+        quiet: true
+
+    - name: Check the IIS application has an active 1C ISAPI handler
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+          $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
+          $app = '{{ one_c_web_site_name }}/{{ one_c_web_alias }}'
+          $output = & $appcmd list config $app /section:system.webServer/handlers /config:* 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "Cannot read IIS handlers for $app" }
+          $active = (($output -join [Environment]::NewLine) -match '(?i)wsisapi\.dll')
+          $Ansible.Result = @{ one_c_handler_active = [bool]$active }
+      register: iis_handler_check
+      changed_when: false
+      check_mode: false
+
+    - name: Require 1C to be routed through its IIS handler
+      ansible.builtin.assert:
+        that:
+          - iis_handler_check.result.one_c_handler_active | bool
+        fail_msg: IIS still does not apply the 1C wsisapi.dll handler to the publication.
+        quiet: true
+
+- name: Check the published 1C page from the Ubuntu VM
+  hosts: lab_vm
+  gather_facts: false
+  tasks:
+    - name: Request the web client through the Host-Only address
+      ansible.builtin.uri:
+        url: http://192.168.56.103:8082/trainingBase/
+        method: GET
+        follow_redirects: all
+        return_content: true
+        status_code: [200, 401]
+        timeout: 15
+      register: web_client_response
+      changed_when: false
+      check_mode: false
+      retries: 5
+      delay: 3
+      until: web_client_response is succeeded
+
+    - name: Reject generic IIS or missing-page responses
+      ansible.builtin.assert:
+        that:
+          - web_client_response.status | int in [200, 401]
+          - web_client_response.content | default('') is not search('(?i)IIS Windows Server|HTTP Error 404')
+          - web_client_response.content | default('') is search('e1csys/mngsrv')
+        fail_msg: The 1C web client or its authentication page did not open from Ubuntu.
+        quiet: true

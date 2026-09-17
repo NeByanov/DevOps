@@ -36,7 +36,14 @@ one_c_db_user: one_c_db_user
 one_c_infobase_locale: en_US
 one_c_platform_conf_dir: C:\Program Files (x86)\1cv8\8.5.1.1522\bin\conf
 one_c_techlog_dir: C:\1C-lab\logs\tech
-
+# Reuse the existing lab IIS site named "127.0.0.1"; the name is not its binding.
+one_c_web_site_name: "127.0.0.1"
+one_c_web_bind_ip: "192.168.56.103"
+one_c_web_port: 8082
+one_c_web_alias: "trainingBase"
+one_c_web_app_pool: "OneCWebPool"
+one_c_web_connstr: "Srvr=localhost;Ref={{ one_c_infobase_name }};"
+one_c_web_allowed_subnet: "192.168.56.0/24"
 
 ansible_winrm_password: !vault |
           $ANSIBLE_VAULT;1.1;AES256
