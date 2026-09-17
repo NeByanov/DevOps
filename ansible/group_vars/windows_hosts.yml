@@ -34,6 +34,9 @@ one_c_db_port: 5432
 one_c_db_name: OneC
 one_c_db_user: one_c_db_user
 one_c_infobase_locale: en_US
+one_c_platform_conf_dir: C:\Program Files (x86)\1cv8\8.5.1.1522\bin\conf
+one_c_techlog_dir: C:\1C-lab\logs\tech
+
 
 ansible_winrm_password: !vault |
           $ANSIBLE_VAULT;1.1;AES256

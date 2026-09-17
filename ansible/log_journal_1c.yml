@@ -1,0 +1,37 @@
+---
+- name: Configure and verify 1C RAS
+  hosts: windows_hosts
+  gather_facts: false
+
+  tasks:
+    - name: Create directory for journal
+      ansible.windows.win_file:
+        path: "{{ one_c_techlog_dir }}"
+        state: directory
+      register: directory_journal
+
+    - name: ACL for journal directory
+      ansible.windows.win_acl:
+        path: "{{ one_c_techlog_dir }}"
+        user: "\\svc_1c_lab"
+        type: allow
+        rights: Modify
+        inherit: ContainerInherit,ObjectInherit
+
+    - name: Create log.xml
+      ansible.windows.win_copy:
+        dest: "{{ one_c_platform_conf_dir }}/logcfg.xml"
+        content: |
+          <?xml version='1.0' encoding='UTF-8'?>
+          <config xmlns="http://v8.1c.ru/v8/tech-log">
+          <log location="{{ one_c_techlog_dir }}" history="4" placement="plain" format="json">
+          <event>
+          <ne property="Name" value="EXCP"/>
+          </event>
+          <event>
+          <eq property="name" value="SINTEG"/>
+          </event>
+          <property name="all">
+          </property>
+          </log>
+          </config>
