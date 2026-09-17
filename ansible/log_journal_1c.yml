@@ -36,7 +36,7 @@
     - name: Remove inherited Users rights
       ansible.windows.win_shell: |
         icacls "{{ one_c_techlog_dir }}" /remove "*S-1-5-32-545"
-      when: users_acl_check.stdout | trim == "present"
+      when: users_acl_check.stdout | default('absent') | trim == "present"
     # --- Создание logcfg.xml ---
     - name: Ensure conf directory exists
       ansible.windows.win_file:
