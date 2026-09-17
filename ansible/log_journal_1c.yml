@@ -3,6 +3,10 @@
   hosts: windows_hosts
   gather_facts: false
 
+  vars:
+    history: 5
+    duration_value: 15000000
+
   tasks:
     # --- Создание папки для логов ---
     - name: Create directory for journal
@@ -21,7 +25,6 @@
     - name: Remove inherited Users rights (language-independent via SID)
       ansible.windows.win_shell: |
         icacls "{{ one_c_techlog_dir }}" /remove "*S-1-5-32-545"
-      changed_when: false
 
     - name: ACL for journal directory (svc_1c_lab)
       ansible.windows.win_acl:
@@ -44,13 +47,13 @@
         content: |
           <?xml version='1.0' encoding='UTF-8'?>
           <config xmlns="http://v8.1c.ru/v8/tech-log">
-            <log location="{{ one_c_techlog_dir }}" history="4" placement="plain" format="json">
+            <log location="{{ one_c_techlog_dir }}" history="{{ history }}" placement="plain" format="json">
               <event>
                 <eq property="Name" value="excp"/>
               </event>
               <event>
                 <ne property="Name" value=""/>
-                <ge property="Durationus" value="5000000"/>
+                <ge property="Durationus" value="{{ duration_value }}"/>
               </event>
               <property name="all"/>
             </log>

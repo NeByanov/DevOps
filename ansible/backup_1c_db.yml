@@ -2,8 +2,8 @@
   hosts: lab_vm
   gather_facts: true
 
-  vars:
-    backup_dir: "{{ ansible_env.HOME }}/backups/postgres-1c"
+vars:
+  backup_dir: "{{ ansible_env.HOME }}/backups/postgres-1c"
 
   tasks:
     - name: Populate service facts
