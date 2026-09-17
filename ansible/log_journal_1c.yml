@@ -1,5 +1,5 @@
 ---
-- name: Configure and verify 1C RAS
+- name: Create techLog for 1C
   hosts: windows_hosts
   gather_facts: false
 
@@ -22,19 +22,21 @@
         state: absent
         reorganize: true
 
-    - name: Remove inherited Users rights (language-independent via SID)
+    - name: Check if Users group (S-1-5-32-545) has rights
+      ansible.windows.win_shell: |
+        $acl = Get-Acl "{{ one_c_techlog_dir }}"
+        $sid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
+        $found = $acl.Access | Where-Object {
+          try { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) -eq $sid } catch { $false }
+        }
+        if ($found) { Write-Output "present" } else { Write-Output "absent" }
+      register: users_acl_check
+      changed_when: false
+
+    - name: Remove inherited Users rights
       ansible.windows.win_shell: |
         icacls "{{ one_c_techlog_dir }}" /remove "*S-1-5-32-545"
-
-    - name: ACL for journal directory (svc_1c_lab)
-      ansible.windows.win_acl:
-        path: "{{ one_c_techlog_dir }}"
-        user: ".\\svc_1c_lab"
-        type: allow
-        rights: Modify
-        inherit: ContainerInherit, ObjectInherit
-        propagation: None
-        state: present
+      when: users_acl_check.stdout | trim == "present"
     # --- Создание logcfg.xml ---
     - name: Ensure conf directory exists
       ansible.windows.win_file:
