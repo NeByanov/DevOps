@@ -184,6 +184,7 @@
         state: absent
       when: default_site_app.exists
 
+
     - name: Allow HTTP to 1C publication only from the Host-Only subnet
       community.windows.win_firewall_rule:
         name: 1C web client 8082 Host-Only
