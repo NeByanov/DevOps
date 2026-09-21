@@ -13,7 +13,7 @@ services:
         condition: service_healthy
     networks:
       - frontend
-
+      - monitoring_monitoring
     healthcheck:
       test: ["CMD-SHELL", "curl -kfsS https://127.0.0.1/api/health > /dev/null || exit 1"]
       interval: 10s
@@ -85,3 +85,5 @@ volumes:
 networks:
   frontend:
   backend:
+  monitoring_monitoring:
+    external: true
