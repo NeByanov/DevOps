@@ -1,0 +1,206 @@
+---
+# ============================================================
+#  Задача роли alloy
+# ============================================================
+
+# ── 1. Проверка действующего сертификата Nginx на SAN ────
+#    Каждый запуск получает текущий сертификат, без устаревающего /tmp-кэша.
+
+- name: Read current Nginx certificate on controller
+  ansible.builtin.shell: |
+    set -o pipefail
+    openssl s_client -connect {{ nginx_host }}:{{ nginx_port }} \
+      -servername {{ nginx_host }} </dev/null 2>/dev/null \
+      | openssl x509 -outform PEM
+  args:
+    executable: /bin/bash
+  register: nginx_cert_pem
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: nginx_cert_pem.rc != 0 or 'BEGIN CERTIFICATE' not in nginx_cert_pem.stdout
+
+- name: Verify Nginx certificate contains the target IP in SAN
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -noout
+      - -checkip
+      - "{{ nginx_host }}"
+    stdin: "{{ nginx_cert_pem.stdout }}"
+  register: nginx_cert_ip_check
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  # OpenSSL 3 may return rc=0 even when -checkip reports a mismatch.
+  # Fail closed unless it explicitly confirms this exact IP.
+  failed_when: >-
+    nginx_cert_ip_check.rc != 0 or
+    (nginx_cert_ip_check.stdout | trim) !=
+    ('IP ' ~ nginx_host ~ ' does match certificate')
+
+# ── 2. Доставка публичного сертификата и импорт в Root ───
+
+- name: Ensure Alloy data directory exists
+  ansible.windows.win_file:
+    path: "{{ alloy_data_dir }}"
+    state: directory
+
+- name: Copy current Nginx certificate to Windows host
+  ansible.windows.win_copy:
+    content: "{{ nginx_cert_pem.stdout }}"
+    dest: "{{ alloy_ca_cert_file }}"
+
+- name: Import Nginx certificate into Windows Trusted Root store
+  ansible.windows.win_certificate_store:
+    path: "{{ alloy_ca_cert_file }}"
+    state: present
+    store_location: LocalMachine
+    store_name: Root
+
+# ── 3. Загрузка установщика Alloy (фиксированная версия) ─
+
+- name: Check if Alloy service already exists
+  ansible.windows.win_service_info:
+    name: Alloy
+  register: alloy_service_info
+
+- name: Check installed Alloy binary
+  ansible.windows.win_stat:
+    path: "{{ alloy_install_dir }}\\alloy-windows-amd64.exe"
+  register: alloy_binary_info
+
+- name: Read installed Alloy version
+  ansible.windows.win_command:
+    argv:
+      - "{{ alloy_install_dir }}\\alloy-windows-amd64.exe"
+      - --version
+  register: alloy_current_version
+  changed_when: false
+  when: alloy_binary_info.stat.exists
+
+- name: Decide whether Alloy installation is needed
+  ansible.builtin.set_fact:
+    alloy_install_required: >-
+      {{ not alloy_service_info.exists or
+         not alloy_binary_info.stat.exists or
+         ('version v' ~ alloy_version) not in (alloy_current_version.stdout | default('')) }}
+
+- name: Ensure installer directory exists when installing
+  ansible.windows.win_file:
+    path: "{{ alloy_temp_dir }}"
+    state: directory
+  when: alloy_install_required | bool
+
+- name: Download Alloy installer (v{{ alloy_version }}) from GitHub Releases
+  ansible.windows.win_get_url:
+    url: "{{ alloy_download_url }}"
+    dest: "{{ alloy_temp_dir }}\\alloy-installer-windows-amd64.exe.zip"
+    force: true
+  when: alloy_install_required | bool
+
+- name: Unzip Alloy installer
+  community.windows.win_unzip:
+    src: "{{ alloy_temp_dir }}\\alloy-installer-windows-amd64.exe.zip"
+    dest: "{{ alloy_temp_dir }}"
+    creates: "{{ alloy_temp_dir }}\\alloy-installer-windows-amd64.exe"
+  when: alloy_install_required | bool
+
+# ── 4. Доставка конфигурации из проекта Ansible ──────────
+
+- name: Ensure Alloy config directory exists
+  ansible.windows.win_file:
+    path: "{{ alloy_config_dir }}"
+    state: directory
+
+- name: Deploy config.alloy from Jinja2 template
+  ansible.windows.win_template:
+    src: config.alloy.j2
+    dest: "{{ alloy_config_file }}"
+  notify: restart alloy
+
+- name: Ensure Alloy storage directory exists
+  ansible.windows.win_file:
+    path: "{{ alloy_storage_path }}"
+    state: directory
+
+# ── 5. Тихая установка Alloy (только при отсутствии версии) ─
+#    LocalSystem — значение по умолчанию, /USERNAME не нужен.
+#    Start-Process -Wait -PassThru даёт реальный exit code.
+#    /FORCEREGISTRY=yes сбрасывает старые ключи реестра при повторах.
+
+- name: Install Alloy silently (v{{ alloy_version }})
+  ansible.windows.win_powershell:
+    script: |
+      $installer = "{{ alloy_temp_dir }}\alloy-installer-windows-amd64.exe"
+      $configPath = "{{ alloy_config_file }}"
+      $process = Start-Process -FilePath $installer `
+        -ArgumentList '/S', "/CONFIG=`"$configPath`"", '/DISABLEREPORTING=yes', '/FORCEREGISTRY=yes' `
+        -Wait -PassThru -NoNewWindow
+      if ($process.ExitCode -ne 0) {
+        Write-Error "Installer exited with code $($process.ExitCode)"
+        exit 1
+      }
+      # Проверяем, что служба создана
+      $svc = Get-Service -Name 'Alloy' -ErrorAction SilentlyContinue
+      if (-not $svc) {
+        Write-Error "Service 'Alloy' was not created after installation"
+        exit 1
+      }
+      Write-Output "Alloy installed, service exists: $($svc.Status)"
+  register: alloy_install_result
+  when: alloy_install_required | bool
+
+
+# ── 6. Настройка аргументов службы в реестре ──────────────
+
+- name: Ensure Alloy storage directory exists
+  ansible.windows.win_file:
+    path: "{{ alloy_storage_path }}"
+    state: directory
+
+- name: Set Alloy service arguments in registry
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\GrafanaLabs\Alloy
+    name: Arguments
+    data:
+      - "run"
+      - "{{ alloy_config_file }}"
+      - "--storage.path={{ alloy_storage_path }}"
+      - "--server.http.listen-addr={{ alloy_http_listen_addr }}:{{ alloy_http_listen_port }}"
+    type: multistring
+  notify: restart alloy
+
+- name: Validate Alloy config before starting service
+  ansible.windows.win_command:
+    argv:
+      - "{{ alloy_install_dir }}\\alloy-windows-amd64.exe"
+      - validate
+      - "{{ alloy_config_file }}"
+  changed_when: false
+
+- name: Apply pending Alloy restart after validation
+  ansible.builtin.meta: flush_handlers
+
+# ── 7. Запуск и проверка службы ───────────────────────────
+
+- name: Ensure Alloy service is running with autostart
+  ansible.windows.win_service:
+    name: Alloy
+    state: started
+    start_mode: auto
+    username: "{{ alloy_service_username }}"
+  register: alloy_service_state
+
+- name: Show Alloy service status
+  ansible.builtin.debug:
+    msg: "Alloy service: state={{ alloy_service_state.state }}, start_mode={{ alloy_service_state.start_mode }}"
+
+# ── 8. Очистка временных файлов ───────────────────────────
+
+- name: Remove temp installer files
+  ansible.windows.win_file:
+    path: "{{ alloy_temp_dir }}"
+    state: absent
+  when: alloy_install_required | bool

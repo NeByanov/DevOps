@@ -1,0 +1,48 @@
+---
+# ============================================================
+#  Grafana Alloy — переменные. Меняйте версию только здесь.
+#  Не используйте latest — только точные релизы из GitHub.
+# ============================================================
+
+alloy_version: "1.19.2"
+
+# Официальный источник — GitHub Releases
+alloy_download_url: >-
+  https://github.com/grafana/alloy/releases/download/v{{ alloy_version }}/alloy-installer-windows-amd64.exe.zip
+
+# Временная директория на Windows
+alloy_temp_dir: "C:\\temp\\alloy-install"
+
+# Каталог установки (по умолчанию NSIS → %PROGRAMFILES%)
+alloy_install_dir: "C:\\Program Files\\GrafanaLabs\\Alloy"
+
+# Конфигурация
+alloy_config_dir: "C:\\Program Files\\GrafanaLabs\\Alloy"
+alloy_config_file: "{{ alloy_config_dir }}\\config.alloy"
+
+# Хранилище позиций чтения логов и публичный сертификат Nginx
+alloy_data_dir: "C:\\ProgramData\\GrafanaLabs\\Alloy"
+alloy_storage_path: "{{ alloy_data_dir }}\\data"
+alloy_ca_cert_file: "{{ alloy_data_dir }}\\nginx_cert.pem"
+
+# HTTP-интерфейс Alloy — только localhost
+alloy_http_listen_addr: "127.0.0.1"
+alloy_http_listen_port: 12345
+
+# Учётная запись службы
+alloy_service_username: "LocalSystem"
+
+# Отключить телеметрию
+alloy_disable_reporting: true
+
+# ── Сбор логов ──
+alloy_log_path: "C:\\1C-lab\\logs\\tech\\*.log"
+alloy_sync_period: "5s"
+
+# ── Loki через Nginx ──
+loki_push_url: "https://192.168.56.101/loki/api/v1/push"
+loki_tls_server_name: "192.168.56.101"
+
+# ── Nginx cert ──
+nginx_host: "192.168.56.101"
+nginx_port: 443

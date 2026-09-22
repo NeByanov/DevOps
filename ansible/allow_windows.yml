@@ -1,0 +1,5 @@
+---
+- name: Install and configure Grafana Alloy on Windows
+  hosts: windows_hosts
+  roles:
+    - alloy

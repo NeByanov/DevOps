@@ -1,0 +1,63 @@
+// ============================================================
+//  Grafana Alloy — конфигурация
+//  Управляется Ansible. Не редактируйте вручную на хосте.
+//  Собирает логи из C:\1C-lab\logs\tech\*.log
+//  Отправляет в Loki через Nginx (TLS), не напрямую на 3100.
+// ============================================================
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// ── Обнаружение лог-файлов по glob-шаблону ──────────────
+//  sync_period пересканирует ФС, чтобы подхватывать
+//  новые файлы при ротации журналов 1C.
+local.file_match "tech_logs" {
+  path_targets = [
+    {
+      "__path__" = {{ alloy_log_path | to_json }},
+      "job"      = "1c-tech",
+      "host"     = constants.hostname,
+      "source"   = "file",
+      "service"  = "1c",
+    },
+  ]
+  sync_period = "{{ alloy_sync_period }}"
+}
+
+// ── Чтение логов ───────────────────────────────────────
+//  tail_from_end = true — на первом запуске читаем только
+//  новые строки, не отправляем весь старый объём.
+//  Позиция чтения сохраняется в --storage.path и переживает
+//  перезапуск службы Alloy.
+loki.source.file "tech_logs" {
+  targets       = local.file_match.tech_logs.targets
+  forward_to    = [loki.relabel.stable_labels.receiver]
+  tail_from_end = true
+}
+
+// loki.source.file добавляет filename автоматически. Убираем
+// эту метку, чтобы ротация файлов не создавала новые потоки.
+loki.relabel "stable_labels" {
+  forward_to = [loki.write.loki_push.receiver]
+
+  rule {
+    action = "labeldrop"
+    regex  = "filename"
+  }
+}
+
+// ── Отправка в Loki через Nginx ───────────────────────
+//  TLS-проверка включена. Сертификат Nginx импортирован
+//  в доверенное хранилище Windows (LocalMachine\Root).
+//  insecure_skip_verify НЕ используется.
+loki.write "loki_push" {
+  endpoint {
+    url = "{{ loki_push_url }}"
+
+    tls_config {
+      server_name = "{{ loki_tls_server_name }}"
+    }
+  }
+}
