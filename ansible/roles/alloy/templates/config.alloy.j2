@@ -43,6 +43,14 @@ loki.relabel "stable_labels" {
   forward_to = [loki.write.loki_push.receiver]
 
   rule {
+    source_labels = ["filename"]
+    regex         = `.*[\\/](ragent|rmngr|rphost|ras|rac|1cv8c)_[0-9]+_[0-9]+\.log`
+    replacement   = "$1"
+    target_label  = "component"
+    action        = "replace"
+  }
+
+  rule {
     action = "labeldrop"
     regex  = "filename"
   }
