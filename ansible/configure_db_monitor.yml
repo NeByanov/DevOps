@@ -1,0 +1,289 @@
+---
+- name: Configure the restricted PostgreSQL monitoring role
+  hosts: lab_vm
+  gather_facts: false
+
+  vars:
+    db_monitor_role: db_monitor
+    db_monitor_database: OneC
+    db_monitor_container: postgres-1c
+    db_monitor_expected_state: "t|t|f|f|f|f|f|t"
+    db_monitor_secret_directory: /home/vboxuser/dockerproject/monitoring/secrets
+    db_monitor_secret_path: "{{ db_monitor_secret_directory }}/pg_monitor_password.txt"
+
+  tasks:
+    - name: Require the encrypted monitoring password
+      ansible.builtin.assert:
+        that:
+          - db_monitor_password is defined
+          - db_monitor_password | length >= 16
+        fail_msg: >-
+          Add db_monitor_password to group_vars/lab_vm.yml with
+          ansible-vault edit before running this playbook.
+      no_log: true
+
+    - name: Read the current monitoring role state
+      become: true
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ db_monitor_container }}"
+          - psql
+          - -X
+          - -A
+          - -t
+          - -F
+          - "|"
+          - -v
+          - ON_ERROR_STOP=1
+          - -U
+          - "{{ postgres_user }}"
+          - -d
+          - "{{ postgres_db }}"
+          - -c
+          - >-
+            SELECT r.rolcanlogin, r.rolinherit, r.rolsuper, r.rolcreatedb,
+            r.rolcreaterole, r.rolreplication, r.rolbypassrls,
+            EXISTS (
+              SELECT 1 FROM pg_auth_members m
+              JOIN pg_roles parent ON parent.oid = m.roleid
+              WHERE m.member = r.oid AND parent.rolname = 'pg_monitor'
+            )
+            FROM pg_roles r WHERE r.rolname = 'db_monitor'
+      register: db_monitor_state_before
+      changed_when: false
+      check_mode: false
+
+    - name: Create the restricted monitoring role when absent
+      become: true
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - -i
+          - --env
+          - DB_MONITOR_PASSWORD
+          - "{{ db_monitor_container }}"
+          - psql
+          - -X
+          - -v
+          - ON_ERROR_STOP=1
+          - -U
+          - "{{ postgres_user }}"
+          - -d
+          - "{{ postgres_db }}"
+        stdin: |
+          \getenv db_monitor_password DB_MONITOR_PASSWORD
+          SET password_encryption = 'scram-sha-256';
+          CREATE ROLE db_monitor WITH LOGIN INHERIT PASSWORD :'db_monitor_password'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+      environment:
+        DB_MONITOR_PASSWORD: "{{ db_monitor_password }}"
+      when:
+        - not ansible_check_mode
+        - db_monitor_state_before.stdout | trim == ""
+      no_log: true
+
+    - name: Enforce restricted attributes on the existing role
+      become: true
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ db_monitor_container }}"
+          - psql
+          - -X
+          - -v
+          - ON_ERROR_STOP=1
+          - -U
+          - "{{ postgres_user }}"
+          - -d
+          - "{{ postgres_db }}"
+          - -c
+          - >-
+            ALTER ROLE db_monitor WITH LOGIN INHERIT NOSUPERUSER NOCREATEDB
+            NOCREATEROLE NOREPLICATION NOBYPASSRLS
+      when:
+        - not ansible_check_mode
+        - db_monitor_state_before.stdout | trim != ""
+        - (db_monitor_state_before.stdout | trim).split('|')[0:7] != ['t', 't', 'f', 'f', 'f', 'f', 'f']
+
+    - name: Grant pg_monitor membership when missing
+      become: true
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ db_monitor_container }}"
+          - psql
+          - -X
+          - -v
+          - ON_ERROR_STOP=1
+          - -U
+          - "{{ postgres_user }}"
+          - -d
+          - "{{ postgres_db }}"
+          - -c
+          - GRANT pg_monitor TO db_monitor
+      when:
+        - not ansible_check_mode
+        - >-
+          db_monitor_state_before.stdout | trim == '' or
+          (db_monitor_state_before.stdout | trim).split('|')[7] != 't'
+
+    - name: Test the vaulted password through PostgreSQL authentication
+      become: true
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - --env
+          - PGPASSWORD
+          - "{{ db_monitor_container }}"
+          - psql
+          - -X
+          - -A
+          - -t
+          - -w
+          - -h
+          - 127.0.0.1
+          - -U
+          - "{{ db_monitor_role }}"
+          - -d
+          - "{{ db_monitor_database }}"
+          - -c
+          - SELECT 1
+      environment:
+        PGPASSWORD: "{{ db_monitor_password }}"
+      register: db_monitor_password_probe
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+      no_log: true
+
+    - name: Synchronize the role password with Ansible Vault
+      become: true
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - -i
+          - --env
+          - DB_MONITOR_PASSWORD
+          - "{{ db_monitor_container }}"
+          - psql
+          - -X
+          - -v
+          - ON_ERROR_STOP=1
+          - -U
+          - "{{ postgres_user }}"
+          - -d
+          - "{{ postgres_db }}"
+        stdin: |
+          \getenv db_monitor_password DB_MONITOR_PASSWORD
+          SET password_encryption = 'scram-sha-256';
+          ALTER ROLE db_monitor PASSWORD :'db_monitor_password';
+      environment:
+        DB_MONITOR_PASSWORD: "{{ db_monitor_password }}"
+      when:
+        - not ansible_check_mode
+        - db_monitor_password_probe.rc != 0
+      no_log: true
+
+    - name: Create the exporter secrets directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ db_monitor_secret_directory }}"
+        state: directory
+        owner: vboxuser
+        group: vboxuser
+        mode: "0700"
+
+    - name: Render the exporter password from Ansible Vault
+      become: true
+      ansible.builtin.copy:
+        content: "{{ db_monitor_password }}\n"
+        dest: "{{ db_monitor_secret_path }}"
+        owner: "65534"
+        group: "65534"
+        mode: "0400"
+      no_log: true
+      diff: false
+
+    - name: Read the final monitoring role state
+      become: true
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - "{{ db_monitor_container }}"
+          - psql
+          - -X
+          - -A
+          - -t
+          - -F
+          - "|"
+          - -v
+          - ON_ERROR_STOP=1
+          - -U
+          - "{{ postgres_user }}"
+          - -d
+          - "{{ postgres_db }}"
+          - -c
+          - >-
+            SELECT r.rolcanlogin, r.rolinherit, r.rolsuper, r.rolcreatedb,
+            r.rolcreaterole, r.rolreplication, r.rolbypassrls,
+            EXISTS (
+              SELECT 1 FROM pg_auth_members m
+              JOIN pg_roles parent ON parent.oid = m.roleid
+              WHERE m.member = r.oid AND parent.rolname = 'pg_monitor'
+            )
+            FROM pg_roles r WHERE r.rolname = 'db_monitor'
+      register: db_monitor_state_after
+      changed_when: false
+      check_mode: false
+
+    - name: Verify the restricted role and pg_monitor membership
+      ansible.builtin.assert:
+        that:
+          - db_monitor_state_after.stdout | trim == db_monitor_expected_state
+        fail_msg: "db_monitor does not have the required restricted state"
+        success_msg: "db_monitor is restricted and belongs to pg_monitor"
+
+    - name: Verify the final password authentication
+      become: true
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - --env
+          - PGPASSWORD
+          - "{{ db_monitor_container }}"
+          - psql
+          - -X
+          - -A
+          - -t
+          - -w
+          - -h
+          - 127.0.0.1
+          - -U
+          - "{{ db_monitor_role }}"
+          - -d
+          - "{{ db_monitor_database }}"
+          - -c
+          - SELECT current_user
+      environment:
+        PGPASSWORD: "{{ db_monitor_password }}"
+      register: db_monitor_final_login
+      changed_when: false
+      when: not ansible_check_mode
+      no_log: true
+
+    - name: Confirm final login result
+      ansible.builtin.assert:
+        that:
+          - db_monitor_final_login.rc == 0
+        fail_msg: "db_monitor cannot authenticate with the vaulted password"
+        success_msg: "db_monitor password authentication succeeded"
+      when: not ansible_check_mode
